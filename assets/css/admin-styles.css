@@ -1,0 +1,634 @@
+/* Marpico Plugin - Modern Admin Styles */
+/* Actualizando con diseño moderno inspirado en interfaces de productividad */
+
+/* Variables CSS para consistencia de diseño */
+:root {
+  --marpico-primary: #1f2937;
+  --marpico-primary-light: #374151;
+  --marpico-accent: #8b5cf6;
+  --marpico-accent-light: #a78bfa;
+  --marpico-success: #10b981;
+  --marpico-warning: #f59e0b;
+  --marpico-error: #ef4444;
+  --marpico-info: #3b82f6;
+  --marpico-background: #ffffff;
+  --marpico-surface: #f8fafc;
+  --marpico-border: #e5e7eb;
+  --marpico-text: #1f2937;
+  --marpico-text-muted: #6b7280;
+  --marpico-radius: 12px;
+  --marpico-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --marpico-shadow-lg:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+.tabs {
+  margin-bottom: 20px;
+}
+
+.marpico-btn-tabs {
+  background: #0058ff;
+  color: white;
+  box-shadow: 0 4px 14px 0 rgba(139, 92, 246, 0.3);
+}
+
+.marpico-btn-tabs:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px 0 rgba(139, 92, 246, 0.4);
+}
+
+#toplevel_page_marpico-sync .wp-menu-image img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  padding-top: 6px;
+}
+
+.marpico-admin-container {
+  display: flex;
+  min-height: 100vh;
+  background: var(--marpico-surface);
+  font-family: "Work Sans", "Space Grotesk", Inter, "DM Sans", sans-serif;
+  margin: 0;
+  max-width: none;
+}
+
+.marpico-sidebar {
+  width: 300px;
+  background: var(--marpico-background);
+  border-right: 1px solid var(--marpico-border);
+  padding: 0;
+  position: fixed;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.marpico-sidebar-header {
+  padding: 24px 24px;
+  border-bottom: 1px solid var(--marpico-border);
+  margin-bottom: 24px;
+  background-color: #f5f5f5;
+}
+
+.marpico-sidebar-title {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--marpico-primary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.marpico-sidebar-subtitle {
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: var(--marpico-text-muted);
+  margin: 0;
+}
+
+.marpico-nav-section {
+  margin-bottom: 20px;
+}
+.marpico-autor {
+  padding: 20px;
+  display: block;
+}
+.version-marpico-woo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+span.marpico-version-autor {
+  font-size: 14px;
+  color: #0058ff;
+}
+span.marpico-version-text {
+  font-size: 12px;
+  color: #c1c1c1;
+}
+.marpico-nav-section-title {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--marpico-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 24px 12px;
+  margin: 0;
+  display: flex;
+  gap: 5px;
+}
+
+.marpico-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 40px;
+  color: var(--marpico-text);
+  text-decoration: none;
+  transition: all 0.2s ease;
+  border-left: 3px solid transparent;
+}
+
+.marpico-nav-item:hover {
+  background: var(--marpico-surface);
+  color: var(--marpico-accent);
+  border-left-color: var(--marpico-accent);
+  border-radius: 0px 10px 10px 0px;
+  margin: 0px 10px 0px 10px;
+}
+
+.marpico-nav-item.active {
+  background: rgba(139, 92, 246, 0.1);
+  color: var(--marpico-accent);
+  border-left-color: var(--marpico-accent);
+  font-weight: 600;
+  border-radius: 0px 10px 10px 0px;
+  margin: 0px 10px 0px 10px;
+}
+
+a.marpico-nav-item:focus {
+  box-shadow: none;
+  outline: none;
+}
+span.marpico-nav-img img {
+  width: 40px;
+}
+.marpico-nav-icon {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+
+.marpico-nav-title-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+/* Contenido principal */
+.marpico-main-content {
+  flex: 1;
+  margin-left: 300px;
+  padding: 20px;
+  background: var(--marpico-surface);
+}
+
+/* Header del contenido */
+.marpico-content-header {
+  background: var(--marpico-background);
+  border-radius: var(--marpico-radius);
+  padding: 30px;
+  margin-bottom: 14px;
+  border: 1px solid var(--marpico-border);
+}
+
+.marpico-content-title {
+  font-size: 1.6rem;
+  font-weight: 500;
+  color: var(--marpico-primary);
+  margin: 0 0 8px 0;
+}
+
+.marpico-content-subtitle {
+  font-size: 1rem;
+  color: var(--marpico-text-muted);
+  margin: 0;
+  letter-spacing: normal;
+}
+
+/* Tarjetas modernas */
+.marpico-card {
+  background: var(--marpico-background);
+  border-radius: var(--marpico-radius);
+  padding: 32px;
+  margin-bottom: 24px;
+  border: 1px solid var(--marpico-border);
+  transition: all 0.2s ease;
+}
+
+.marpico-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: between;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--marpico-border);
+}
+
+.marpico-card-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--marpico-primary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.marpico-card-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgb(0, 0, 0);
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+/* Grid de estadísticas mejorado */
+.marpico-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+  margin: 24px 0;
+}
+
+.marpico-stat-card {
+  background: linear-gradient(
+    135deg,
+    var(--marpico-background) 0%,
+    var(--marpico-surface) 100%
+  );
+  border: 1px solid var(--marpico-border);
+  border-radius: var(--marpico-radius);
+  padding: 24px;
+  text-align: center;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.marpico-stat-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--marpico-accent) 0%,
+    var(--marpico-success) 100%
+  );
+}
+
+.marpico-stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--marpico-shadow-lg);
+}
+
+.marpico-stat-value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--marpico-primary);
+  margin: 0 0 8px 0;
+  line-height: 1;
+}
+
+.marpico-stat-label {
+  font-size: 0.875rem;
+  color: var(--marpico-text-muted);
+  font-weight: 500;
+  margin: 0;
+}
+
+/* Opciones de sincronización mejoradas */
+.marpico-sync-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.marpico-sync-option {
+  border: 2px solid var(--marpico-border);
+  border-radius: var(--marpico-radius);
+  padding: 24px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: var(--marpico-background);
+  position: relative;
+  overflow: hidden;
+}
+
+.marpico-sync-option::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  transition: left 0.5s;
+}
+
+.marpico-sync-option:hover {
+  border-color: var(--marpico-accent);
+  transform: translateY(-4px);
+  box-shadow: var(--marpico-shadow-lg);
+}
+
+.marpico-sync-option:hover::before {
+  left: 100%;
+}
+
+.marpico-sync-option.active {
+  border-color: var(--marpico-accent);
+  background: rgba(139, 92, 246, 0.05);
+}
+
+.marpico-sync-option.active::before {
+  background: var(--marpico-accent);
+}
+
+.marpico-sync-option h3 {
+  margin: 0 0 8px 0;
+  color: var(--marpico-primary);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.marpico-sync-option p {
+  margin: 0;
+  color: var(--marpico-text-muted);
+  font-size: 0.9rem;
+}
+
+/* Botones modernos mejorados */
+.marpico-btn {
+  padding: 14px 28px !important;
+  border: none !important;
+  line-height: 20px !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  font-size: 0.95rem !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.marpico-btn::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  transition: left 0.5s;
+}
+
+.marpico-btn:hover::before {
+  left: 100%;
+}
+
+.marpico-btn-primary {
+  background: linear-gradient(
+    135deg,
+    var(--marpico-accent) 0%,
+    var(--marpico-accent-light) 100%
+  ) !important;
+  color: white !important;
+  box-shadow: 0 4px 14px 0 rgba(139, 92, 246, 0.3);
+}
+
+.marpico-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px 0 rgba(139, 92, 246, 0.4);
+}
+
+.marpico-btn-secondary {
+  background: linear-gradient(135deg, var(--marpico-success) 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.3);
+}
+
+.marpico-btn-secondary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px 0 rgba(16, 185, 129, 0.4);
+}
+
+.marpico-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* Formularios mejorados */
+.marpico-form-group {
+  margin-bottom: 24px;
+}
+
+.marpico-label {
+  display: block;
+  font-weight: 600;
+  color: var(--marpico-primary);
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.marpico-input {
+  width: 100%;
+  padding: 14px 16px;
+  border: 2px solid var(--marpico-border);
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: all 0.2s ease;
+  background: var(--marpico-background);
+  color: var(--marpico-text);
+}
+
+.marpico-input:focus {
+  outline: none;
+  border-color: var(--marpico-accent);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+}
+
+/* Logs mejorados */
+.marpico-logs {
+  background: var(--marpico-primary);
+  border-radius: var(--marpico-radius);
+  padding: 20px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.marpico-log-entry {
+  margin: 6px 0;
+  padding: 6px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.marpico-log-timestamp {
+  color: #9ca3af;
+  font-weight: 500;
+  min-width: 140px;
+  flex-shrink: 0;
+}
+
+.marpico-log-message {
+  flex: 1;
+}
+
+.marpico-log-success .marpico-log-message {
+  color: var(--marpico-success);
+}
+
+.marpico-log-error .marpico-log-message {
+  color: var(--marpico-error);
+}
+
+.marpico-log-info .marpico-log-message {
+  color: var(--marpico-info);
+}
+
+.marpico-log-warning .marpico-log-message {
+  color: var(--marpico-warning);
+}
+#marpico_categoria_excluir {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  border: 1px solid #ccc;
+  padding: 10px;
+  border-radius: 6px;
+  background: #fff;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+}
+#marpico_categoria_excluir label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+/* Barra de progreso mejorada */
+.marpico-progress-container {
+  background: var(--marpico-surface);
+  border-radius: var(--marpico-radius);
+  padding: 24px;
+  margin: 24px 0;
+  border: 1px solid var(--marpico-border);
+}
+
+.marpico-progress-bar {
+  width: 100%;
+  height: 16px;
+  background: var(--marpico-border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 16px 0;
+  position: relative;
+}
+
+.marpico-progress-fill {
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    var(--marpico-accent) 0%,
+    var(--marpico-success) 100%
+  );
+  border-radius: 8px;
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+.marpico-progress-fill::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 100%
+  );
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.marpico-progress-text {
+  font-weight: 600;
+  color: var(--marpico-primary);
+  text-align: center;
+  margin: 8px 0;
+}
+
+/* Responsive mejorado */
+@media (max-width: 1024px) {
+  .marpico-sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+
+  .marpico-main-content {
+    margin-left: 0;
+  }
+
+  .marpico-sidebar.open {
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 768px) {
+  .marpico-sync-options {
+    grid-template-columns: 1fr;
+  }
+
+  .marpico-stats-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .marpico-main-content {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .marpico-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}

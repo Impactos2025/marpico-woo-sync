@@ -1,0 +1,770 @@
+<!-- Development version -->
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+
+<div class="marpico-admin-container">
+    <!-- Sidebar moderno -->
+    <div class="marpico-sidebar">
+        <div class="marpico-sidebar-header">
+            <div class="marpico-sidebar-title">
+                <span class="marpico-nav-img">
+                  <img src="<?php echo MARPICO_WOO_SYNC_URL . 'assets/icon-128x128.png'; ?>" alt="icon-logo">
+                </span>
+                <div>
+                    <span class="marpico-nav-title">
+                        Marpico Sync
+                    </span>
+                    <p class="marpico-sidebar-subtitle">Sincronización de productos</p>
+                </div>
+            </div>
+        </div>
+        <!-- Nav  -->
+        <nav class=¨nav-plugin-api¨>
+            <div class="marpico-nav-section">
+                <h3 class="marpico-nav-section-title">
+                  <span class="marpico-nav-title-icon">
+                    <i data-lucide="layout-dashboard"></i>
+                  </span>
+                  Dashboard
+                </h3>
+                <a href="#overview" class="marpico-nav-item active" data-section="overview">
+                    <span class="marpico-nav-icon">
+                      <i data-lucide="folder-sync"></i>
+                    </span>
+                    Resumen General
+                </a>
+            </div>
+
+            <div class="marpico-nav-section">
+                <h3 class="marpico-nav-section-title">
+                  <span class="marpico-nav-title-icon">
+                    <i data-lucide="settings"></i> 
+                  </span>
+                  Configuración
+                </h3>
+                <a href="#api-config" class="marpico-nav-item" data-section="api-config">
+                    <span class="marpico-nav-icon">
+                      <i data-lucide="code-xml"></i>
+                    </span>
+                    Configuración de API
+                </a>
+                <a href="#specify-products" class="marpico-nav-item" data-section="specify-products">
+                    <span class="marpico-nav-icon">
+                      <i data-lucide="scan-barcode"></i>
+                    </span>
+                    Especificaciones Producto
+                </a>
+            </div>
+
+            <div class="marpico-nav-section">
+                <h3 class="marpico-nav-section-title">
+                  <span class="marpico-nav-title-icon">
+                    <i data-lucide="square-dashed-mouse-pointer"></i> 
+                  </span>
+                  Herramientas
+                </h3>
+                <a href="#sync" class="marpico-nav-item" data-section="sync">
+                    <span class="marpico-nav-icon">
+                        <i data-lucide="package"></i>
+                    </span>
+                    Sincronización
+                </a>
+                <a href="#price" class="marpico-nav-item" data-section="price">
+                    <span class="marpico-nav-icon">
+                        <i data-lucide="package"></i>
+                    </span>
+                    Ajuste precio x (Monto)
+                </a>
+                <a href="#brand" class="marpico-nav-item" data-section="brand">
+                    <span class="marpico-nav-icon">
+                        <i data-lucide="package"></i>
+                    </span>
+                    Ajuste precio x (%)
+                </a>
+                <a href="#logs" class="marpico-nav-item" data-section="logs">
+                    <span class="marpico-nav-icon">
+                      <i data-lucide="logs"></i>
+                    </span>
+                    Registro de Actividad
+                </a>
+            </div>
+        </nav>
+        <!-- Footer Side bar  -->
+        <div class="marpico-autor">
+            <div class="version-marpico-woo">
+                <span class="marpico-version-autor">By David Perez</span>
+                <span class="marpico-version-text">Versión <?php echo esc_html( MARPICO_SYNC_VERSION ); ?></span>
+            </div>
+        </div>  
+    </div>
+
+    <!-- Contenido principal -->
+    <div class="marpico-main-content">
+        <!-- Header del contenido -->
+        <div class="marpico-content-header">
+            <h1 class="marpico-content-title">Dashboard</h1>
+            <p class="marpico-content-subtitle">Gestiona la sincronización de productos entre tu API externa y WooCommerce</p>
+        </div>
+
+        <!-- Sección: Resumen General -->
+        <div id="section-overview" class="marpico-content-section">
+            <div class="marpico-card">
+                <div class="marpico-card-header">
+                    <h2 class="marpico-card-title">
+                        <span class="marpico-card-icon">
+                          <i data-lucide="chart-no-axes-column"></i>
+                        </span>
+                        Estadísticas
+                    </h2>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sección: Configuración API -->
+        <div id="section-api-config" class="marpico-content-section" style="display: none;">
+            <div class="marpico-card">
+                <div class="marpico-card-header">
+                    <h2 class="marpico-card-title">
+                        <span class="marpico-card-icon">
+                            <i data-lucide="code-xml"></i>
+                        </span>
+                        Configuración de API
+                    </h2>
+                </div>
+                <form method="post" action="options.php">
+                    <?php settings_fields('marpico_sync_settings'); ?>
+                    <?php do_settings_sections('marpico_sync_settings'); ?>
+                    <?php $provider = get_option('marpico_active_provider', 'marpico');
+                        if ($provider === 'marpico') {
+                            error_log('Usando Marpico');
+                            $sync = new Marpico_Sync();
+                        }
+                        elseif ($provider === 'beststock') {
+                            error_log('Usando BestStock');
+                            $sync = new BestStock_Sync();
+                        }
+                        elseif ($provider === 'cdo') {
+                            error_log('Usando CDO');
+                            $sync = new CDO_Sync();
+                        }
+                    ?>
+                    <div class="marpico-form-group">
+                        <label for="marpico_active_provider">Marca / Proveedor</label>
+                        <select id="marpico_active_provider" name="marpico_active_provider">
+                            <option value="marpico" <?php selected( $provider, 'marpico' ); ?>>Marpico</option>
+                            <option value="beststock" <?php selected( $provider, 'beststock' ); ?>>BestStock</option>
+                            <option value="cdo" <?php selected( $provider, 'cdo' ); ?>>CDO</option>
+                        </select>
+                    </div>
+                    <!-- Campos para Marpico -->
+                    <div id="marpico-fields" class="provider-fields">
+                        <div class="marpico-form-group">
+                            <label class="marpico-label" for="marpico_api_endpoint">API Endpoint</label>
+                            <input type="url" id="marpico_api_endpoint" name="marpico_api_endpoint" class="marpico-input"
+                                value="<?php echo esc_attr(get_option('marpico_api_endpoint')); ?>"
+                                placeholder="https://api.marpico.com/productos">
+                        </div>
+                        <div class="marpico-form-group">
+                            <label class="marpico-label" for="marpico_api_token">API Token</label>
+                            <input type="password" id="marpico_api_token" name="marpico_api_token" class="marpico-input"
+                                value="<?php echo esc_attr(get_option('marpico_api_token')); ?>"
+                                placeholder="Token de acceso">
+                        </div>
+                    </div>
+                    <!-- Campos para BestStock -->
+                    <div id="beststock-fields" class="provider-fields">
+                        <div class="marpico-form-group">
+                            <label class="marpico-label" for="beststock_api_endpoint">API Endpoint</label>
+                            <input type="url" id="beststock_api_endpoint" name="beststock_api_endpoint" class="marpico-input"
+                                value="<?php echo esc_attr(get_option('beststock_api_endpoint')); ?>"
+                                placeholder="https://api.beststock.com/productos">
+                        </div>
+                    </div>
+                    <!-- Campos para CDO -->
+                    <div id="cdo-fields" class="provider-fields">
+                        <div class="marpico-form-group">
+                            <label class="marpico-label" for="cdo_api_endpoint">API Endpoint</label>
+                            <input
+                                type="url"
+                                id="cdo_api_endpoint"
+                                name="cdo_api_endpoint"
+                                class="marpico-input"
+                                value="<?php echo esc_attr(get_option('cdo_api_endpoint')); ?>"
+                                placeholder="http://api.colombia.cdopromocionales.com/v2/products"
+                            >
+                        </div>
+                        <div class="marpico-form-group">
+                            <label class="marpico-label" for="cdo_api_token">
+                                API Token
+                            </label>
+
+                            <input
+                                type="text"
+                                id="cdo_api_token"
+                                name="cdo_api_token"
+                                class="marpico-input"
+                                value="<?php echo esc_attr(get_option('cdo_api_token')); ?>"
+                                placeholder="Auth Token"
+                            >
+                        </div>
+                    </div>
+                    <?php submit_button('Guardar Configuración', 'marpico-btn marpico-btn-primary', 'submit', false, ['class' => 'marpico-btn marpico-btn-primary']); ?>
+                </form>
+            </div>
+        </div>
+
+        <!-- Sección: Especificaciones Producto -->
+        <div id="section-specify-products" class="marpico-content-section" style="display: none;">
+            <div class="marpico-card">
+                <div class="marpico-card-header">
+                    <h2 class="marpico-card-title">
+                        <span class="marpico-card-icon">
+                            <i data-lucide="scan-barcode"></i>
+                        </span>
+                        Especificaciones Producto
+                    </h2>
+                </div>
+                <div class="marpico-sync-options">
+                    <div class="marpico-specify-products">
+                        <h3>Creación de Campos Personalizados</h3>
+                        <p>Añade estos <strong>meta keys</strong> para cada producto sincronizado:</p>
+
+                        <ul style="margin:0; padding-left:20px; line-height:1.6;">
+                        <li><code>_marpico_material</code> — Material del producto.</li>
+                        <li><code>_marpico_empaque_individual</code> — Empaque individual.</li>
+                        <li><code>_marpico_empaque_unds_caja</code> — Unidades por caja.</li>
+                        <li><code>_marpico_empaque_unds_medida</code> — Medida de las unidades.</li>
+                        <li><code>_marpico_empaque_largo</code> — Largo del empaque.</li>
+                        <li><code>_marpico_empaque_ancho</code> — Ancho del empaque.</li>
+                        <li><code>_marpico_empaque_alto</code> — Alto del empaque.</li>
+                        <li><code>_marpico_empaque_peso_neto</code> — Peso neto.</li>
+                        <li><code>_marpico_empaque_peso_bruto</code> — Peso bruto.</li>
+                        <li><code>_marpico_area_impresion</code> — Área de impresión.</li>
+                        <li><code>_marpico_medidas_largo</code> — Medida largo.</li>
+                        <li><code>_marpico_medidas_ancho</code> — Medida ancho.</li>
+                        <li><code>_marpico_medidas_alto</code> — Medida alto.</li>
+                        <li><code>_marpico_medidas_diametro</code> — Diámetro.</li>
+                        <li><code>_marpico_medidas_peso_neto</code> — Peso neto.</li>
+                        <li><code>_marpico_tecnica_marca_codigo</code> — Código de la técnica/marca.</li>
+                        <li><code>_marpico_tecnica_marca_tecnica</code> — Técnica de marcaje.</li>
+                        <li><code>_marpico_tecnica_marca_precio</code> — Precio de la técnica.</li>
+                        <li><code>_marpico_tecnica_marca_num_tintas</code> — Número de tintas.</li>
+                        <li><code>_marpico_tecnica_marca_descripcion</code> — Descripción de la técnica.</li>
+                        </ul>
+
+                        <p style="margin-top:10px; font-size:12px; color:#777;">
+                        Consejo: Para ver o editar estos campos en un producto, activa la opción <em>Campos personalizados</em> en las
+                        “Opciones de pantalla” al editar el producto.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sección: Sincronización -->
+        <div id="section-sync" class="marpico-content-section" style="display: none;">
+            <!-- ===== Sincronización Marpico ===== -->
+            <div id="sync-marpico" class="sync-content">
+                <!-- Tabs -->
+                <div class="tabs">
+                    <button data-tab="batch" class="tab-btn marpico-btn marpico-btn-tabs">Sync por Lotes</button>
+                    <button data-tab="individual" class="tab-btn marpico-btn marpico-btn-tabs">Sync Individual</button>
+                </div>
+                <!-- Sección: Sincronización por Lotes -->
+                <div id="section-batch-sync" class="marpico-content-section">
+                    <div class="marpico-card">
+                        <div class="marpico-card-header">
+                            <h2 class="marpico-card-title">
+                                <span class="marpico-card-icon">
+                                <i data-lucide="package"></i>
+                                </span>
+                                Sincronización por Lotes
+                            </h2>
+                        </div>
+                        <p>Este proceso sincronizará todos los productos disponibles en la API externa con tu tienda WooCommerce en lotes de 20 productos.</p>
+                        <button id="sync-products-batch" class="marpico-btn marpico-btn-primary">
+                            Iniciar Sincronización por Lotes
+                        </button>
+                        <div id="marpico-sync-status-batch" style="margin-top: 24px;"></div>
+                    </div>
+                </div>
+                <!-- Sección: Sincronización Individual -->
+                <div id="section-individual-sync" class="marpico-content-section" style="display:none;">
+                    <div class="marpico-card">
+                        <div class="marpico-card-header">
+                            <h2 class="marpico-card-title">
+                                <span class="marpico-card-icon">
+                                <i data-lucide="database-zap"></i>
+                                </span>
+                                Sincronización Individual
+                            </h2>
+                        </div>
+                        <p>Sincroniza un producto específico usando su código de familia. Perfecto para actualizaciones puntuales.</p>
+                        <div class="marpico-form-group">
+                            <label class="marpico-label" for="product-code-input">Código de Producto</label>
+                            <input type="text" id="product-code-input" class="marpico-input" placeholder="Ej: VI2094">
+                        </div>
+                        <button id="sync-individual-product" class="marpico-btn marpico-btn-secondary">
+                            Sincronizar Producto
+                        </button>
+                        <div id="individual-sync-status" style="margin-top: 24px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== Sincronización Beststock ===== -->
+            <div id="sync-beststock" class="sync-content" style="display:none;">
+                <div class="marpico-card">
+                    <div class="marpico-card-header">
+                        <h2 class="marpico-card-title">
+                            <span class="marpico-card-icon">
+                                <i data-lucide="database"></i>
+                            </span>
+                            Sincronización BestStock
+                        </h2>
+                    </div>
+                    <p>Elije la categoría de BestStock que deseas sincronizar.</p>
+
+                    <!-- Select Categorías BestStock (Padre) -->
+                    <div class="marpico-form-group">
+                        <label class="marpico-label" for="beststock-category">Categoría BestStock</label>
+                        <select id="beststock-category" class="marpico-input">
+                            <option value="">Cargando categorías...</option>
+                        </select>
+                    </div>
+
+                    <!-- Select Subcategorías BestStock (Hijo) -->
+                    <div class="marpico-form-group" id="beststock-subcategory-wrapper">
+                        <label class="marpico-label" for="beststock-subcategory">Subcategoría BestStock</label>
+                        <select id="beststock-subcategory" class="marpico-input" disabled>
+                            <option value="">Selecciona una subcategoría</option>
+                        </select>
+                    </div>
+
+                    <!-- Select Categorías WooCommerce -->
+                    <div class="marpico-form-group">
+                        <label class="marpico-label" for="wc-category">Categoría en WooCommerce</label>
+                        <select id="wc-category" class="marpico-input">
+                            <option value="">Selecciona una categoría</option> <!-- opción por defecto -->
+                            <?php
+                                // Obtener solo categorías padre de producto en WooCommerce
+                                $product_categories = get_terms( array(
+                                    'taxonomy'   => 'product_cat',
+                                    'hide_empty' => false,
+                                    'parent'     => 0, // Solo padres
+                                ) );
+
+                                if ( ! empty( $product_categories ) && ! is_wp_error( $product_categories ) ) {
+                                    foreach ( $product_categories as $cat ) {
+                                        echo '<option value="' . esc_attr( $cat->term_id ) . '">' . esc_html( $cat->name ) . '</option>';
+                                    }
+                                }
+                            ?>
+                        </select>
+                    </div>
+
+                    <div class="marpico-form-group" id="child-category-wrapper" style="display:none;">
+                        <label class="marpico-label" for="wc-category-child">Categoría Hija (WooCommerce)</label>
+                        <select id="wc-category-child" class="marpico-input">
+                            <option value="">Selecciona una subcategoría</option>
+                        </select>
+                    </div>
+
+                    <button id="sync-beststock-category" class="marpico-btn marpico-btn-primary">
+                        Sincronizar Categoría
+                    </button>
+                    <div id="api-sync-status" style="margin-top: 24px;"></div>
+                </div>
+            </div>
+
+            <!-- ===== Sincronización CDO ===== -->
+            <div id="sync-cdo" class="sync-content" style="display:none;">
+                <div class="marpico-card">
+                    <div class="marpico-card-header">
+                        <h2 class="marpico-card-title">
+                            <span class="marpico-card-icon">
+                                <i data-lucide="database"></i>
+                            </span>
+                            Sincronización CDO
+                        </h2>
+                    </div>
+                    <p>Este proceso sincronizará todos los productos disponibles en la API externa con tu tienda WooCommerce en lotes de 10 productos.</p>
+                    <button id="test-provider" class="marpico-btn marpico-btn-primary">
+                            Iniciar Sincronización 
+                    </button>
+                    <div id="cdo-sync-status-batch" style="margin-top: 24px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sección: Price (Marpico) -->
+        <div id="section-price" class="marpico-content-section" style="display: none;">
+            <div class="marpico-card">
+                <div class="marpico-card-header">
+                    <h2 class="marpico-card-title">
+                        <span class="marpico-card-icon">
+                            <i data-lucide="logs"></i>
+                        </span>
+                        Ajuste global de precios por marca
+                    </h2>
+                </div>
+                <div id="ajuste-precios-section" class="marpico-section">
+                    
+                    <!-- Selección de marca -->
+                    <p><strong>Selecciona la marca:</strong></p>
+                    <select id="marpico_marca" style="width: 100%; padding: 4px; margin-bottom: 10px;">
+                        <option value="">-- Selecciona una marca --</option>
+                        <?php
+                        $brands = get_terms([
+                            'taxonomy'   => 'product_brand',
+                            'hide_empty' => false,
+                        ]);
+
+                        if (!empty($brands) && !is_wp_error($brands)) {
+                            foreach ($brands as $brand) {
+                                echo '<option value="' . esc_attr($brand->term_id) . '">' . esc_html($brand->name) . '</option>';
+                            }
+                        }
+                        ?>
+                    </select>
+
+                    <!-- Incremento -->
+                    <p>Ingresa el valor a sumar a los productos seleccionados:</p>
+                    <input type="number" id="marpico_precio_incremento" placeholder="Ej. 1500" style="width: 100%; padding: 4px;" />
+
+                    <!-- Exclusión de categorías -->
+                    <p><strong>Excluir categorías:</strong></p>
+                    <div id="marpico_categoria_excluir">
+                        <?php
+                        $product_categories = get_terms([
+                            'taxonomy'   => 'product_cat',
+                            'hide_empty' => false,
+                            'parent'     => 0,
+                        ]);
+
+                        if (!empty($product_categories) && !is_wp_error($product_categories)) {
+                            foreach ($product_categories as $parent_cat) {
+                                echo '<div class="marpico-cat-parent">';
+                                echo '<label style="display:block; margin-bottom:4px;">
+                                        <input type="checkbox" name="excluded_categories[]" value="' . esc_attr($parent_cat->term_id) . '">
+                                        <strong>' . esc_html($parent_cat->name) . '</strong>
+                                    </label>';
+
+                                // Subcategorías
+                                $child_cats = get_terms([
+                                    'taxonomy'   => 'product_cat',
+                                    'hide_empty' => false,
+                                    'parent'     => $parent_cat->term_id,
+                                ]);
+
+                                if (!empty($child_cats) && !is_wp_error($child_cats)) {
+                                    echo '<div style="margin-left: 20px;">';
+                                    foreach ($child_cats as $child_cat) {
+                                        echo '<label style="display:block;">
+                                                <input type="checkbox" name="excluded_categories[]" value="' . esc_attr($child_cat->term_id) . '">
+                                                ' . esc_html($child_cat->name) . '
+                                            </label>';
+                                    }
+                                    echo '</div>';
+                                }
+
+                                echo '</div>';
+                            }
+                        } else {
+                            echo '<p>No hay categorías disponibles.</p>';
+                        }
+                        ?>
+                    </div>
+
+                    <button id="marpico_aplicar_aumento" class="button button-primary" style="margin-top:10px;">Aplicar aumento</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sección: Price Marca -->
+        <div id="section-brand" class="marpico-content-section" style="display: none;">
+            <div class="marpico-card">
+                <div class="marpico-card-header">
+                    <h2 class="marpico-card-title">
+                        <span class="marpico-card-icon">
+                            <i data-lucide="logs"></i>
+                        </span>
+                        Ajuste de precios por marca
+                    </h2>
+                </div>
+
+                <div id="ajuste-precios-marca-section" class="marpico-section">
+
+                    <p>Selecciona la marca:</p>
+
+                    <select id="marpico_marca_select">
+
+                    <?php
+                    $brands = get_terms([
+                        'taxonomy'   => 'product_brand',
+                        'hide_empty' => false
+                    ]);
+
+                    foreach ($brands as $brand) {
+                        echo '<option value="' . esc_attr($brand->term_id) . '">'
+                            . esc_html($brand->name) .
+                            '</option>';
+                    }
+                    ?>
+
+                    </select>
+
+                    <p>Porcentaje de aumento:</p>
+
+                    <input 
+                        type="number" 
+                        id="marpico_porcentaje_incremento" 
+                        placeholder="Ej. 10" 
+                        step="0.1"
+                    />
+
+                    <p style="font-size:12px;color:#666;">
+                        Ejemplo: si ingresas <strong>10</strong> el precio aumentará un <strong>10%</strong>
+                    </p>
+
+                    <p><strong>Excluir marcas:</strong></p>
+
+                    <div id="marpico_marcas_excluir">
+
+                        <?php
+                        $brands = get_terms([
+                            'taxonomy'   => 'product_brand',
+                            'hide_empty' => false
+                        ]);
+
+                        if (!empty($brands) && !is_wp_error($brands)) {
+
+                            foreach ($brands as $brand) {
+
+                                echo '<label style="display:block; margin-bottom:4px;">
+                                        <input type="checkbox" name="excluded_brands[]" value="' . esc_attr($brand->term_id) . '">
+                                        ' . esc_html($brand->name) . '
+                                    </label>';
+
+                            }
+
+                        } else {
+                            echo '<p>No hay marcas disponibles.</p>';
+                        }
+                        ?>
+
+                    </div>
+
+                    <p><strong>Excluir categorías:</strong></p>
+
+                    <div id="marpico_categoria_excluir_brand">
+
+                    <?php
+                    $product_categories = get_terms([
+                        'taxonomy'   => 'product_cat',
+                        'hide_empty' => false,
+                        'parent'     => 0,
+                    ]);
+
+                    if (!empty($product_categories) && !is_wp_error($product_categories)) {
+
+                        foreach ($product_categories as $parent_cat) {
+
+                            echo '<div class="marpico-cat-parent">';
+
+                            echo '<label style="display:block; margin-bottom:4px;">
+                                    <input type="checkbox" name="excluded_categories_brand[]" value="' . esc_attr($parent_cat->term_id) . '">
+                                    <strong>' . esc_html($parent_cat->name) . '</strong>
+                                </label>';
+
+                            $child_cats = get_terms([
+                                'taxonomy'   => 'product_cat',
+                                'hide_empty' => false,
+                                'parent'     => $parent_cat->term_id,
+                            ]);
+
+                            if (!empty($child_cats) && !is_wp_error($child_cats)) {
+
+                                echo '<div style="margin-left:20px;">';
+
+                                foreach ($child_cats as $child_cat) {
+
+                                    echo '<label style="display:block;">
+                                            <input type="checkbox" name="excluded_categories_brand[]" value="' . esc_attr($child_cat->term_id) . '">
+                                            ' . esc_html($child_cat->name) . '
+                                        </label>';
+                                }
+
+                                echo '</div>';
+                            }
+
+                            echo '</div>';
+                        }
+
+                    } else {
+
+                        echo '<p>No hay categorías disponibles.</p>';
+
+                    }
+                    ?>
+
+                    </div>
+
+                    <button 
+                        id="marpico_aplicar_aumento_marca" 
+                        class="button button-primary">
+                        Aplicar aumento por marca
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sección: Logs -->
+        <div id="section-logs" class="marpico-content-section" style="display: none;">
+            <div class="marpico-card">
+                <div class="marpico-card-header">
+                    <h2 class="marpico-card-title">
+                        <span class="marpico-card-icon">
+                            <i data-lucide="logs"></i>
+                        </span>
+                        Registro de Actividad
+                    </h2>
+                </div>
+                <div class="marpico-logs" id="marpico-logs-container">
+                    <?php
+                    $logs = get_option('marpico_sync_log', []);
+                    if (empty($logs)) {
+                        echo '<div class="marpico-log-entry marpico-log-info">';
+                        echo '<span class="marpico-log-timestamp">[' . current_time('Y-m-d H:i:s') . ']</span>';
+                        echo '<span class="marpico-log-message">No hay registros disponibles</span>';
+                        echo '</div>';
+                    } else {
+                        foreach (array_slice($logs, 0, 20) as $log) {
+                            $log_class = 'marpico-log-info';
+                            if (strpos($log, '✓') !== false || strpos($log, 'exitosamente') !== false) {
+                                $log_class = 'marpico-log-success';
+                            } elseif (strpos($log, 'Error') !== false || strpos($log, 'error') !== false) {
+                                $log_class = 'marpico-log-error';
+                            }
+                            
+                            // Extraer timestamp si existe
+                            preg_match('/\[(.*?)\](.*)/', $log, $matches);
+                            if (count($matches) >= 3) {
+                                echo '<div class="marpico-log-entry ' . $log_class . '">';
+                                echo '<span class="marpico-log-timestamp">[' . esc_html($matches[1]) . ']</span>';
+                                echo '<span class="marpico-log-message">' . esc_html(trim($matches[2])) . '</span>';
+                                echo '</div>';
+                            } else {
+                                echo '<div class="marpico-log-entry ' . $log_class . '">';
+                                echo '<span class="marpico-log-message">' . esc_html($log) . '</span>';
+                                echo '</div>';
+                            }
+                        }
+                    }
+                    ?>
+                </div>
+        </div>
+        
+    </div>
+</div>
+
+<script>
+jQuery(document).ready(function($) {
+
+    // Cargar estadísticas al iniciar
+    loadSystemStats();
+    
+    function loadSystemStats() {
+        $.post(marpico_ajax.ajax_url, {
+            action: 'marpico_get_sync_stats',
+            security: marpico_ajax.nonce
+        }, function(response) {
+            if (response.success) {
+                $('#total-products-stat').text(response.data.total_products);
+                $('#last-sync-stat').text(response.data.last_sync);
+                $('#sync-errors-stat').text(response.data.sync_errors);
+                $('#api-status-stat').text(response.data.api_status);
+            }
+        });
+    }
+    // Actualizar estadísticas cada 30 segundos
+    setInterval(loadSystemStats, 30000);
+});
+</script>
+
+<script>
+    lucide.createIcons({
+      attrs: {
+        'stroke-width': 1.5
+      },
+      nameAttr: 'data-lucide', // attribute for the icon name.
+    });
+  </script>
+
+<script>
+jQuery(document).ready(function($) {
+  // --- Sidebar nav (mantener tu comportamiento actual) ---
+  $('.marpico-nav-item').on('click', function(e) {
+    e.preventDefault();
+    $('.marpico-nav-item').removeClass('active');
+    $(this).addClass('active');
+    $('.marpico-content-section').hide();
+    const section = $(this).data('section');
+    $('#section-' + section).show();
+  });
+
+  // --- Toggle provider fields (al cambiar en el select) ---
+  function toggleProviderFields() {
+    const provider = $('#marpico_active_provider').val();
+    $('.provider-fields').hide();
+    if (provider === 'marpico') {
+      $('#marpico-fields').show();
+    } else if (provider === 'beststock') {
+      $('#beststock-fields').show();
+    } else if (provider === 'cdo') {
+      $('#cdo-fields').show();
+    }
+  }
+  // inicial
+  toggleProviderFields();
+  // on change (si el usuario cambia antes de guardar)
+  $('#marpico_active_provider').on('change', toggleProviderFields);
+
+  // --- Mostrar la sección de sincronización adecuada según la opción guardada ---
+  const activeProvider = "<?php echo esc_js( get_option('marpico_active_provider', 'marpico') ); ?>";
+  // Mostrar el bloque sync global
+  $('#section-sync').hide(); // ocultar por defecto
+  // Asegúrate que el contenedor de sync existe
+  if ($('#section-sync').length) {
+    // Mostrar la parte de Marpico o Beststock
+    if (activeProvider === 'marpico') {
+        $('#sync-marpico').show();
+        $('#sync-beststock').hide();
+        $('#sync-cdo').hide();
+    } else if (activeProvider === 'beststock')  {
+        $('#sync-marpico').hide();
+        $('#sync-beststock').show();
+        $('#sync-cdo').hide();
+    } else if (activeProvider === 'cdo')  {
+        $('#sync-marpico').hide();
+        $('#sync-beststock').hide();
+        $('#sync-cdo').show();
+    }
+  }
+
+  // --- Tabs inside Marpico (batch / individual) ---
+  $('.tab-btn').on('click', function() {
+    const tab = $(this).data('tab');
+    $('#section-batch-sync').hide();
+    $('#section-individual-sync').hide();
+    if (tab === 'batch') $('#section-batch-sync').show();
+    if (tab === 'individual') $('#section-individual-sync').show();
+  });
+
+  // Mostrar por defecto batch si estamos con Marpico
+  if (activeProvider === 'marpico') {
+    $('#section-batch-sync').show();
+    $('#section-individual-sync').hide();
+  }
+});
+</script>
