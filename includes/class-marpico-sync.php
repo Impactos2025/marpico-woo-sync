@@ -146,54 +146,11 @@ class Marpico_Sync {
             }
         }
 
-        // Asignar categoría (padre e hijo)
+        // Asignar categoría (padre e hijo) vía la capa de mapeo canónica.
+        // Aplica alias (p.ej. "Oficina y Negocios" -> "Oficina") para que Marpico
+        // y CDO compartan los mismos términos del menú.
         if ( $category ) {
-            $term_id = 0;
-
-            // Padre
-            $parent_slug = sanitize_title( $category );
-            $parent_term = get_term_by( 'slug', $parent_slug, 'product_cat' );
-            if ( ! $parent_term ) {
-                $newt = wp_insert_term( $category, 'product_cat', [ 'slug' => $parent_slug ] );
-                if ( ! is_wp_error( $newt ) && isset( $newt['term_id'] ) ) {
-                    $parent_id = intval( $newt['term_id'] );
-                }
-            } else {
-                $parent_id = intval( $parent_term->term_id );
-            }
-
-            // Hija
-            $child_name = $first['subcategoria_1']['nombre'] ?? '';
-            if ( $child_name ) {
-                $child_slug = sanitize_title( $child_name );
-                $child_term = get_term_by( 'slug', $child_slug, 'product_cat' );
-                if ( ! $child_term ) {
-                    $child_insert = wp_insert_term( $child_name, 'product_cat', [ 'slug' => $child_slug, 'parent' => ( $parent_id ?? 0 ) ] );
-                    if ( ! is_wp_error( $child_insert ) && isset( $child_insert['term_id'] ) ) {
-                        $term_id = intval( $child_insert['term_id'] );
-                    }
-                } else {
-                    $term_id = intval( $child_term->term_id );
-                    // Asegurar que la relación padre -> hijo sea correcta
-                    if ( isset( $parent_id ) && $child_term->parent != $parent_id ) {
-                        wp_update_term( $term_id, 'product_cat', [ 'parent' => $parent_id ] );
-                    }
-                }
-            } else {
-                // Si no hay hija, asignar solo padre
-                if ( isset( $parent_id ) ) $term_id = $parent_id;
-            }
-
-            if ( ! empty( $term_id ) ) {
-                $assign_ids = [$term_id];
-
-                // Si hay padre y no es el mismo que la hija, también lo agregamos
-                if ( ! empty( $parent_id ) && $parent_id !== $term_id ) {
-                    $assign_ids[] = $parent_id;
-                }
-
-                wp_set_object_terms( $product_id, $assign_ids, 'product_cat' );
-            }
+            Category_Mapper::assign_marpico_categories( $product_id, $first );
         }
 
         // Asignar etiquetas (product_tag) desde "temas"

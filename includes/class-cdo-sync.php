@@ -427,55 +427,13 @@ class CDO_Sync {
 
     private function sync_product_categories($product_id, $product) {
 
+        // El mapeo a la taxonomía canónica (y la separación de colecciones a
+        // product_tag) se delega en Category_Mapper para que los productos CDO
+        // caigan en las mismas categorías del menú que los de Marpico.
         $categories = $product['categories'] ?? [];
         if (empty($categories)) return;
 
-        static $category_cache = [];
-        $term_ids = [];
-
-        foreach ($categories as $cat) {
-
-            // Obtener nombre de la categoría
-            if (is_array($cat) && isset($cat['name'])) {
-                $category_name = trim($cat['name']);
-            } elseif (is_string($cat)) {
-                $category_name = trim($cat);
-            } else {
-                continue; // si no tiene nombre válido, saltar
-            }
-
-            if (!$category_name) continue;
-
-            $category_slug = sanitize_title($category_name);
-
-            // Revisar caché
-            if (isset($category_cache[$category_slug])) {
-                $term_ids[] = $category_cache[$category_slug];
-                continue;
-            }
-
-            // Revisar si existe en WP
-            $term = get_term_by('slug', $category_slug, 'product_cat');
-            if (!$term) {
-                $new_term = wp_insert_term($category_name, 'product_cat', ['slug' => $category_slug]);
-                if (!is_wp_error($new_term)) {
-                    $term_id = $new_term['term_id'];
-                } else {
-                    continue; // si falla la creación, saltar
-                }
-            } else {
-                $term_id = $term->term_id;
-            }
-
-            // Guardar en caché y en lista final
-            $category_cache[$category_slug] = $term_id;
-            $term_ids[] = $term_id;
-        }
-
-        // Asignar todas las categorías al producto
-        if (!empty($term_ids)) {
-            wp_set_object_terms($product_id, $term_ids, 'product_cat');
-        }
+        Category_Mapper::assign_cdo_categories($product_id, $categories);
     }
 
     /* private function sync_product_categories($product_id, $product) {

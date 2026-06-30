@@ -4,8 +4,8 @@
  * Description: Sincroniza productos, categorías y etiquetas desde API´s externas hacia WooCommerce.
  * Version: 1.2.2
  * Author: David Perez
- * Author URI:  https://github.com/davidpezcas
- * Plugin URI:  https://github.com/davidpezcas/marpico-woo-sync
+ * Author URI:  https://github.com/Impactos2025
+ * Plugin URI:  https://github.com/Impactos2025/marpico-woo-sync
  * Text Domain: marpico-woo-sync
  */
 
@@ -20,6 +20,7 @@ define( 'MARPICO_WOO_SYNC_PATH', plugin_dir_path( __FILE__ ) );
 define( 'MARPICO_WOO_SYNC_URL',  plugin_dir_url( __FILE__ ) );
 
 // includes
+require_once MARPICO_WOO_SYNC_PATH . 'includes/class-category-mapper.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-marpico-client.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-marpico-sync.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-beststock-client.php';
@@ -35,7 +36,7 @@ if ( is_admin() ) {
     require_once MARPICO_WOO_SYNC_PATH . 'includes/github-updater.php';
 
     // Conectar el plugin a GitHub
-    $repo_url = 'https://github.com/davidpezcas/marpico-woo-sync';
+    $repo_url = 'https://github.com/Impactos2025/marpico-woo-sync';
     new GitHub_Updater(__FILE__, $repo_url);
 }
 
