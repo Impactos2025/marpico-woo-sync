@@ -31,6 +31,7 @@ require_once MARPICO_WOO_SYNC_PATH . 'includes/class-price.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-price-percentage.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-cdo-client.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-cdo-sync.php';
+require_once MARPICO_WOO_SYNC_PATH . 'includes/class-sync-job.php';
 
 if ( is_admin() ) {
     require_once MARPICO_WOO_SYNC_PATH . 'includes/github-updater.php';
@@ -45,6 +46,7 @@ add_action( 'plugins_loaded', function() {
     new Marpico_Admin();
     new Marpico_Price();
     new Marpico_Price_Brand_Percentage();
+    Marpico_Sync_Job::init();
 });
 
 add_action('admin_enqueue_scripts', function() {

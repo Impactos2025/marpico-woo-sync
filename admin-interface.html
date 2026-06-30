@@ -263,14 +263,23 @@
 
         <!-- Sección: Sincronización -->
         <div id="section-sync" class="marpico-content-section" style="display: none;">
+            <!-- Selector de servicio a sincronizar (independiente de la pestaña Configuración de API) -->
+            <div class="marpico-card" style="margin-bottom:16px;">
+                <div class="marpico-form-group" style="margin-bottom:0;">
+                    <label class="marpico-label" for="sync-service-selector">Servicio a sincronizar</label>
+                    <select id="sync-service-selector" class="marpico-input">
+                        <option value="marpico">Marpico</option>
+                        <option value="cdo">CDO</option>
+                        <option value="beststock">BestStock</option>
+                    </select>
+                    <p style="margin:8px 0 0; font-size:12px; color:#777;">
+                        Elige qué proveedor sincronizar ahora. No cambia la configuración de credenciales guardada.
+                    </p>
+                </div>
+            </div>
             <!-- ===== Sincronización Marpico ===== -->
             <div id="sync-marpico" class="sync-content">
-                <!-- Tabs -->
-                <div class="tabs">
-                    <button data-tab="batch" class="tab-btn marpico-btn marpico-btn-tabs">Sync por Lotes</button>
-                    <button data-tab="individual" class="tab-btn marpico-btn marpico-btn-tabs">Sync Individual</button>
-                </div>
-                <!-- Sección: Sincronización por Lotes -->
+                <!-- Sección: Sincronización por Lotes (visible directamente) -->
                 <div id="section-batch-sync" class="marpico-content-section">
                     <div class="marpico-card">
                         <div class="marpico-card-header">
@@ -281,11 +290,14 @@
                                 Sincronización por Lotes
                             </h2>
                         </div>
-                        <p>Este proceso sincronizará todos los productos disponibles en la API externa con tu tienda WooCommerce en lotes de 20 productos.</p>
+                        <p>Sincroniza todos los productos disponibles en la API de Marpico hacia WooCommerce, por lotes y en segundo plano.</p>
                         <button id="sync-products-batch" class="marpico-btn marpico-btn-primary">
                             Iniciar Sincronización por Lotes
                         </button>
                         <div id="marpico-sync-status-batch" style="margin-top: 24px;"></div>
+                        <p style="margin-top:20px;">
+                            <a href="#" id="toggle-individual-sync">¿Necesitas un producto puntual? Sincronización individual ▾</a>
+                        </p>
                     </div>
                 </div>
                 <!-- Sección: Sincronización Individual -->
@@ -711,6 +723,13 @@ jQuery(document).ready(function($) {
     $('.marpico-content-section').hide();
     const section = $(this).data('section');
     $('#section-' + section).show();
+    // Al entrar a Sincronización, re-mostrar el panel del proveedor seleccionado y
+    // la card de lotes (ambas comparten la clase .marpico-content-section que el
+    // hide() de arriba acaba de ocultar).
+    if (section === 'sync') {
+      showSyncPanel($('#sync-service-selector').val());
+      $('#section-batch-sync').show();
+    }
   });
 
   // --- Toggle provider fields (al cambiar en el select) ---
@@ -730,41 +749,25 @@ jQuery(document).ready(function($) {
   // on change (si el usuario cambia antes de guardar)
   $('#marpico_active_provider').on('change', toggleProviderFields);
 
-  // --- Mostrar la sección de sincronización adecuada según la opción guardada ---
-  const activeProvider = "<?php echo esc_js( get_option('marpico_active_provider', 'marpico') ); ?>";
-  // Mostrar el bloque sync global
+  // --- Mostrar el panel de sync según el selector propio (independiente de Configuración) ---
   $('#section-sync').hide(); // ocultar por defecto
-  // Asegúrate que el contenedor de sync existe
-  if ($('#section-sync').length) {
-    // Mostrar la parte de Marpico o Beststock
-    if (activeProvider === 'marpico') {
-        $('#sync-marpico').show();
-        $('#sync-beststock').hide();
-        $('#sync-cdo').hide();
-    } else if (activeProvider === 'beststock')  {
-        $('#sync-marpico').hide();
-        $('#sync-beststock').show();
-        $('#sync-cdo').hide();
-    } else if (activeProvider === 'cdo')  {
-        $('#sync-marpico').hide();
-        $('#sync-beststock').hide();
-        $('#sync-cdo').show();
-    }
+  function showSyncPanel(service) {
+    $('#sync-marpico, #sync-beststock, #sync-cdo').hide();
+    if (service === 'beststock')      $('#sync-beststock').show();
+    else if (service === 'cdo')       $('#sync-cdo').show();
+    else                              $('#sync-marpico').show();
   }
-
-  // --- Tabs inside Marpico (batch / individual) ---
-  $('.tab-btn').on('click', function() {
-    const tab = $(this).data('tab');
-    $('#section-batch-sync').hide();
-    $('#section-individual-sync').hide();
-    if (tab === 'batch') $('#section-batch-sync').show();
-    if (tab === 'individual') $('#section-individual-sync').show();
+  showSyncPanel($('#sync-service-selector').val());
+  $('#sync-service-selector').on('change', function() {
+    showSyncPanel($(this).val());
   });
 
-  // Mostrar por defecto batch si estamos con Marpico
-  if (activeProvider === 'marpico') {
-    $('#section-batch-sync').show();
-    $('#section-individual-sync').hide();
-  }
+  // --- Marpico: la card de lotes se ve directo; "individual" se despliega bajo demanda ---
+  $('#section-batch-sync').show();
+  $('#section-individual-sync').hide();
+  $(document).on('click', '#toggle-individual-sync', function(e) {
+    e.preventDefault();
+    $('#section-individual-sync').toggle();
+  });
 });
 </script>

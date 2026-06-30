@@ -11,7 +11,7 @@ class Marpico_Admin {
         add_action( 'wp_ajax_marpico_sync_products', [ $this, 'ajax_sync_products' ] );
         add_action( 'wp_ajax_marpico_sync_products_batch', [ $this, 'ajax_sync_products_batch' ] );
         add_action( 'wp_ajax_marpico_sync_product_individual', [ $this, 'ajax_sync_product_individual' ] );
-        /* add_action( 'wp_ajax_marpico_get_sync_stats', [ $this, 'ajax_get_sync_stats' ] ); */
+        add_action( 'wp_ajax_marpico_get_sync_stats', [ $this, 'ajax_get_sync_stats' ] );
 
         //Nuevo hook para BestStock
         add_action( 'wp_ajax_get_child_categories', [ $this, 'ajax_get_child_categories' ] );
@@ -22,6 +22,13 @@ class Marpico_Admin {
         add_action( 'wp_ajax_marpico_get_all_product_categories', [ $this, 'ajax_get_all_product_categories' ]);
 
         add_action( 'wp_ajax_marpico_sync_batch', [$this,'ajax_sync_batch']);
+
+        // Sincronización en segundo plano (Action Scheduler)
+        add_action( 'wp_ajax_marpico_sync_start',  [ $this, 'ajax_sync_start' ] );
+        add_action( 'wp_ajax_marpico_sync_status', [ $this, 'ajax_sync_status' ] );
+        add_action( 'wp_ajax_marpico_sync_cancel', [ $this, 'ajax_sync_cancel' ] );
+        add_action( 'wp_ajax_marpico_sync_pause',  [ $this, 'ajax_sync_pause' ] );
+        add_action( 'wp_ajax_marpico_sync_resume', [ $this, 'ajax_sync_resume' ] );
 
         // Reconciliación de categorías (mapeo multi-proveedor)
         add_action( 'wp_ajax_marpico_category_reconcile', [ $this, 'ajax_category_reconcile' ] );
@@ -658,6 +665,78 @@ class Marpico_Admin {
             'provider' => $provider,
             'result' => $result
         ]);
+    }
+
+    /** AJAX: estadísticas básicas para el panel (total productos, último sync, etc.). */
+    public function ajax_get_sync_stats() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+
+        $counts = wp_count_posts( 'product' );
+        $total  = isset( $counts->publish ) ? (int) $counts->publish : 0;
+
+        $job = Marpico_Sync_Job::status();
+        $running = in_array( $job['status'] ?? 'idle', [ 'running', 'queued' ], true );
+
+        wp_send_json_success( [
+            'total_products' => $total,
+            'last_sync'      => $job['updated_at'] ?? 'Nunca',
+            'sync_errors'    => (int) ( $job['failed'] ?? 0 ),
+            'api_status'     => ( ( $job['status'] ?? '' ) === 'failed' ) ? 'Error' : ( $running ? 'Sincronizando' : 'OK' ),
+        ] );
+    }
+
+    /* ===================== Sincronización en segundo plano ===================== */
+
+    /** AJAX: inicia un trabajo de sync en background para el proveedor indicado. */
+    public function ajax_sync_start() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+
+        $provider = sanitize_key( $_POST['provider'] ?? '' );
+        $args = [
+            'category_id'        => intval( $_POST['category_id'] ?? 0 ),
+            'wc_category_parent' => intval( $_POST['wc_category_parent'] ?? 0 ),
+            'wc_category_child'  => intval( $_POST['wc_category_child'] ?? 0 ),
+        ];
+        $batch_size = intval( $_POST['batch_size'] ?? 0 );
+
+        $job = Marpico_Sync_Job::start( $provider, $args, $batch_size );
+        if ( is_wp_error( $job ) ) {
+            wp_send_json_error( $job->get_error_message() );
+        }
+        wp_send_json_success( Marpico_Sync_Job::status() );
+    }
+
+    /** AJAX: devuelve el estado actual del trabajo (para el polling). */
+    public function ajax_sync_status() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+        wp_send_json_success( Marpico_Sync_Job::status() );
+    }
+
+    /** AJAX: cancela el trabajo en curso. */
+    public function ajax_sync_cancel() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+        Marpico_Sync_Job::cancel();
+        wp_send_json_success( Marpico_Sync_Job::status() );
+    }
+
+    /** AJAX: pausa el trabajo en curso. */
+    public function ajax_sync_pause() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+        Marpico_Sync_Job::pause();
+        wp_send_json_success( Marpico_Sync_Job::status() );
+    }
+
+    /** AJAX: reanuda un trabajo pausado o fallido desde el offset guardado. */
+    public function ajax_sync_resume() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+        Marpico_Sync_Job::resume();
+        wp_send_json_success( Marpico_Sync_Job::status() );
     }
 
     private function log_sync_event( $message, $type = 'info' ) {
