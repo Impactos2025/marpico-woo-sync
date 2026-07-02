@@ -358,10 +358,44 @@ class Marpico_Sync_Job {
                 }
                 self::save( $job );
                 self::set_notice( $job );
+                self::purge_caches();  // refresca imágenes/páginas cacheadas tras el sync
             }
         } finally {
             self::release_lock();
         }
+    }
+
+    /**
+     * Purga cachés al terminar un trabajo para que los cambios (imágenes, precios,
+     * productos nuevos) se reflejen sin esperar a que expire la caché. Defensivo:
+     * solo actúa sobre lo que exista. Filtrable/extensible vía acción propia.
+     */
+    public static function purge_caches() {
+        // Object cache (Memcached/Redis, p.ej. SiteGround).
+        if ( function_exists( 'wp_cache_flush' ) ) {
+            wp_cache_flush();
+        }
+
+        // WooCommerce: invalida transients de productos (sube la versión de caché).
+        if ( function_exists( 'wc_delete_product_transients' ) ) {
+            wc_delete_product_transients( 0 );
+        }
+
+        // SiteGround Speed Optimizer (sg-cachepress): API pública de purga total
+        // (dynamic cache + memcached + file cache).
+        if ( function_exists( 'sg_cachepress_purge_everything' ) ) {
+            sg_cachepress_purge_everything();
+        }
+
+        // Otros cachés comunes vía sus acciones estándar (no-op si no están).
+        do_action( 'litespeed_purge_all' );
+        do_action( 'w3tc_flush_all' );
+        do_action( 'wpsc_delete_cache' );
+
+        // Hook propio por si se quiere purgar un CDN u otra capa.
+        do_action( 'marpico_sync_purged_caches' );
+
+        Marpico_Logger::add( 'Caché purgada tras la sincronización', 'info', 'Sistema' );
     }
 
     /**

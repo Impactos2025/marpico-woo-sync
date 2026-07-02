@@ -445,6 +445,23 @@ jQuery(($) => {
     schFreqVisibility($(this).closest(".sch-row"));
   });
 
+  // Reloj vivo con la hora del servidor (el data-ts trae la hora local del sitio
+  // "horneada" como epoch; se avanza desde el momento de carga).
+  (function () {
+    const el = document.getElementById("sched-clock");
+    if (!el) return;
+    const baked = parseInt(el.getAttribute("data-ts"), 10) * 1000; // ms (hora local del sitio)
+    if (!baked) return;
+    const start = Date.now();
+    const p = (n) => (n < 10 ? "0" + n : "" + n);
+    setInterval(function () {
+      const d = new Date(baked + (Date.now() - start));
+      el.textContent =
+        d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate()) +
+        " " + p(d.getUTCHours()) + ":" + p(d.getUTCMinutes()) + ":" + p(d.getUTCSeconds());
+    }, 1000);
+  })();
+
   $("#schedule-save").on("click", function (e) {
     e.preventDefault();
     const schedules = {};
