@@ -185,10 +185,14 @@ jQuery(($) => {
     function statusEl(provider) {
       if (provider === "cdo") return $("#cdo-sync-status-batch");
       if (provider === "beststock") return $("#api-sync-status");
+      if (provider === "price") return $("#marpico-price-status");
       return $("#marpico-sync-status-batch");
     }
     function providerLabel(p) {
-      return p === "cdo" ? "CDO" : p === "beststock" ? "BestStock" : "Marpico";
+      if (p === "cdo") return "CDO";
+      if (p === "beststock") return "BestStock";
+      if (p === "price") return "Ajuste de precios";
+      return "Marpico";
     }
     // Bloquea el selector de servicio mientras un job está activo (no se puede
     // sincronizar otro proveedor a la vez). Activo = queued|running|paused; los
@@ -199,14 +203,19 @@ jQuery(($) => {
       const active =
         job && ["queued", "running", "paused"].indexOf(job.status) >= 0;
       if (active) {
-        if (job.provider && sel.val() !== job.provider) {
+        // Solo fijar el selector si el job es de un proveedor real (no un job de precios).
+        if (
+          job.provider &&
+          job.provider !== "price" &&
+          sel.val() !== job.provider
+        ) {
           sel.val(job.provider).trigger("change");
         }
         sel.prop("disabled", true).attr(
           "title",
-          "Hay una sincronización en curso (" +
+          "Hay un proceso en curso (" +
             providerLabel(job.provider) +
-            "). Cancélala para cambiar de servicio.",
+            "). Cancélalo para cambiar de servicio.",
         );
       } else {
         sel.prop("disabled", false).removeAttr("title");
@@ -312,6 +321,21 @@ jQuery(($) => {
       });
     }
 
+    // Lanza "Aplicar ahora" (job de precios en segundo plano). `extra` lleva la config del formulario.
+    function startPrice(extra) {
+      ajax("marpico_price_apply_start", extra || {}, function (resp) {
+        if (!resp || !resp.success) {
+          const msg = resp && resp.data ? resp.data : "No se pudo iniciar el ajuste de precios";
+          statusEl("price").html('<span style="color:#ef4444;">❌ ' + escapeHtml(msg) + "</span>");
+          addLogEntry(msg, "error");
+          return;
+        }
+        addLogEntry("Ajuste de precios iniciado en segundo plano", "info");
+        render(resp.data);
+        startPoll();
+      });
+    }
+
     // Controles delegados (sobreviven a los re-render del panel).
     $(document).on("click", ".sync-pause", function (e) {
       e.preventDefault();
@@ -340,8 +364,119 @@ jQuery(($) => {
       });
     }
 
-    return { start: start, init: init };
+    return { start: start, startPrice: startPrice, init: init };
   })();
+
+  // ===================== Ajuste de precios: guardar / aplicar =====================
+  function priceFormData() {
+    return {
+      monto: $("#price-monto").val() || 0,
+      porcentaje: $("#price-porcentaje").val() || 0,
+      excluir_cats: $('input[name="excluir_cats[]"]:checked').map(function () { return this.value; }).get(),
+      marcas_porcentaje: $('input[name="marcas_porcentaje[]"]:checked').map(function () { return this.value; }).get(),
+      excluir_marcas: $('input[name="excluir_marcas[]"]:checked').map(function () { return this.value; }).get(),
+    };
+  }
+
+  $("#price-save").on("click", function (e) {
+    e.preventDefault();
+    const btn = $(this).prop("disabled", true).text("Guardando…");
+    $.post(
+      marpico_ajax.ajax_url,
+      Object.assign({ action: "marpico_price_save", security: marpico_ajax.nonce }, priceFormData()),
+      function (resp) {
+        $("#price-save-msg").html(
+          resp && resp.success
+            ? '<span style="color:#16a34a;">✓ Configuración guardada.</span>'
+            : '<span style="color:#ef4444;">❌ ' + (resp && resp.data ? resp.data : "Error") + "</span>",
+        );
+      },
+    ).always(function () {
+      btn.prop("disabled", false).text("Guardar configuración");
+    });
+  });
+
+  $("#price-apply").on("click", function (e) {
+    e.preventDefault();
+    if (!confirm("¿Aplicar el ajuste de precios a todo el catálogo? Se guardará la configuración actual y correrá en segundo plano.")) return;
+    // Guarda la config del formulario y lanza el job de precios.
+    SYNC.startPrice(priceFormData());
+  });
+
+  // Marca excluida (③) → deshabilita su casilla en "recibe %" (②).
+  $(document).on("change", ".price-excl-brand", function () {
+    const id = $(this).data("brand");
+    const pct = $('#price-marcas-pct input[value="' + id + '"]');
+    const wrap = $(".pc-brand-pct-" + id);
+    if (this.checked) {
+      pct.prop("checked", false).prop("disabled", true);
+      wrap.css("opacity", 0.5);
+    } else {
+      pct.prop("disabled", false);
+      wrap.css("opacity", 1);
+    }
+  });
+
+  // ===================== Programación =====================
+  function schFreqVisibility($row) {
+    const f = $row.find(".sch-freq").val();
+    $row.find(".sch-weekday-wrap").toggle(f === "weekly");
+    $row.find(".sch-hour-wrap").toggle(f === "daily" || f === "weekly");
+  }
+  $(".sch-row").each(function () { schFreqVisibility($(this)); });
+  $(document).on("change", ".sch-freq", function () {
+    schFreqVisibility($(this).closest(".sch-row"));
+  });
+
+  $("#schedule-save").on("click", function (e) {
+    e.preventDefault();
+    const schedules = {};
+    $(".sch-row").each(function () {
+      const p = $(this).data("provider");
+      schedules[p] = {
+        enabled: $(this).find(".sch-enabled").is(":checked") ? 1 : 0,
+        frequency: $(this).find(".sch-freq").val(),
+        hour: $(this).find(".sch-hour").val(),
+        weekday: $(this).find(".sch-weekday").val(),
+      };
+    });
+    const btn = $(this).prop("disabled", true).text("Guardando…");
+    $.post(
+      marpico_ajax.ajax_url,
+      { action: "marpico_schedule_save", security: marpico_ajax.nonce, schedules: schedules },
+      function (resp) {
+        if (resp && resp.success) {
+          $("#schedule-msg").html('<span style="color:#16a34a;">✓ Programación guardada.</span>');
+          $.each(resp.data.next || {}, function (p, val) {
+            $('.sch-row[data-provider="' + p + '"] .sch-next').text(val || "—");
+          });
+        } else {
+          $("#schedule-msg").html('<span style="color:#ef4444;">❌ ' + (resp && resp.data ? resp.data : "Error") + "</span>");
+        }
+      },
+    ).always(function () {
+      btn.prop("disabled", false).text("Guardar programación");
+    });
+  });
+
+  $(document).on("click", ".sch-run", function (e) {
+    e.preventDefault();
+    const p = $(this).closest(".sch-row").data("provider");
+    const btn = $(this).prop("disabled", true).text("Iniciando…");
+    $.post(
+      marpico_ajax.ajax_url,
+      { action: "marpico_schedule_run_now", security: marpico_ajax.nonce, provider: p },
+      function (resp) {
+        $("#schedule-msg").html(
+          resp && resp.success
+            ? '<span style="color:#16a34a;">✓ Sincronización ' + p + ' iniciada. Ve a "Sincronización" para ver el progreso.</span>'
+            : '<span style="color:#ef4444;">❌ ' + (resp && resp.data ? resp.data : "Error") + "</span>",
+        );
+      },
+    ).always(function () {
+      btn.prop("disabled", false).text("Ejecutar ahora");
+    });
+  });
 
   // Lanzar sincronización Marpico (catálogo completo) en segundo plano.
   $("#sync-products-batch").on("click", function (e) {
@@ -349,7 +484,117 @@ jQuery(($) => {
     SYNC.start("marpico", {});
   });
 
-  $(document).ready(function () { SYNC.init(); });
+  // ===================== Registro de actividad =====================
+  const LOGS = (function () {
+    let entries = [];
+    let level = "all";
+    let timer = null;
+
+    function levelColor(l) {
+      return l === "error" ? "#ef4444" : l === "warning" ? "#d97706" : l === "success" ? "#16a34a" : "#2271b1";
+    }
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      });
+    }
+
+    function render() {
+      const q = ($("#log-search").val() || "").toLowerCase();
+      const rows = entries.filter(function (e) {
+        if (level !== "all" && e.level !== level) return false;
+        if (q && (e.msg || "").toLowerCase().indexOf(q) < 0 && (e.ctx || "").toLowerCase().indexOf(q) < 0) return false;
+        return true;
+      });
+      const c = $("#marpico-logs-container");
+      if (!rows.length) {
+        c.html('<div style="color:#888;padding:12px;">Sin registros que coincidan.</div>');
+        return;
+      }
+      c.html(
+        rows.map(function (e) {
+          return (
+            '<div class="marpico-log-entry" style="border-left:3px solid ' + levelColor(e.level) +
+            ';padding:6px 10px;margin-bottom:2px;font-size:13px;">' +
+            '<span style="color:#888;">[' + esc(e.t) + "]</span> " +
+            (e.ctx ? '<span style="color:' + levelColor(e.level) + ';font-weight:600;">' + esc(e.ctx) + "</span> " : "") +
+            '<span class="marpico-log-message">' + esc(e.msg) + "</span></div>"
+          );
+        }).join(""),
+      );
+    }
+
+    function applyCounts(counts) {
+      $(".log-count").each(function () {
+        const k = $(this).data("c");
+        $(this).text(counts && counts[k] != null ? counts[k] : 0);
+      });
+    }
+
+    function load() {
+      $.post(
+        marpico_ajax.ajax_url,
+        { action: "marpico_get_logs", security: marpico_ajax.nonce },
+        function (resp) {
+          if (resp && resp.success) {
+            entries = resp.data.entries || [];
+            applyCounts(resp.data.counts);
+            render();
+          }
+        },
+      );
+    }
+
+    function startAuto() {
+      stopAuto();
+      if ($("#log-autorefresh").is(":checked")) timer = setInterval(load, 5000);
+    }
+    function stopAuto() {
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+
+    $(document).on("click", ".log-filter", function () {
+      $(".log-filter").removeClass("active");
+      $(this).addClass("active");
+      level = $(this).data("level");
+      render();
+    });
+    $(document).on("input", "#log-search", render);
+    $(document).on("click", "#log-refresh", function (e) { e.preventDefault(); load(); });
+    $(document).on("change", "#log-autorefresh", startAuto);
+    $(document).on("click", "#log-clear", function (e) {
+      e.preventDefault();
+      if (!confirm("¿Vaciar el registro de actividad?")) return;
+      $.post(marpico_ajax.ajax_url, { action: "marpico_clear_logs", security: marpico_ajax.nonce }, function (resp) {
+        if (resp && resp.success) { entries = []; applyCounts(resp.data.counts); render(); }
+      });
+    });
+    $(document).on("click", "#log-export", function (e) {
+      e.preventDefault();
+      const txt = entries
+        .map(function (x) { return "[" + x.t + "] " + (x.ctx ? x.ctx + " " : "") + (x.level || "").toUpperCase() + ": " + x.msg; })
+        .join("\n");
+      const blob = new Blob([txt], { type: "text/plain" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "marpico-registro.txt";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    // Auto-refresh solo mientras la pestaña Registro está a la vista.
+    $(document).on("click", ".marpico-nav-item", function () {
+      if ($(this).data("section") === "logs") { load(); startAuto(); }
+      else stopAuto();
+    });
+
+    return { load: load };
+  })();
+
+  $(document).ready(function () {
+    SYNC.init();
+    LOGS.load(); // precargar conteos/entradas
+  });
 
   $(document).ready(() => {
     initializeModernInterface();
@@ -490,160 +735,6 @@ jQuery(($) => {
   });
 
   console.log("Script cargado correctamente");
-
-  $("#marpico_aplicar_aumento").on("click", function () {
-    console.log("Botón clickeado");
-
-    const incremento = parseFloat($("#marpico_precio_incremento").val());
-    const marca = parseInt($("#marpico_marca").val()); // NUEVO: marca seleccionada
-    const excluidas = $("input[name='excluded_categories[]']:checked")
-      .map(function () {
-        return $(this).val();
-      })
-      .get();
-
-    console.log("Incremento:", incremento);
-    console.log("Marca:", marca);
-    console.log("Categorías excluidas:", excluidas);
-
-    if (!incremento || incremento === 0) {
-      alert("Por favor ingresa un valor válido para el aumento.");
-      return;
-    }
-
-    if (!marca || marca === 0) {
-      alert("Por favor selecciona una marca.");
-      return;
-    }
-
-    // Mostrar mensaje de carga
-    const boton = $(this);
-    boton.prop("disabled", true).text("Aplicando aumento...");
-    $("#marpico_status_msg").remove();
-    boton.after(
-      "<p id='marpico_status_msg'> Aplicando aumento, por favor espera...</p>",
-    );
-
-    $.ajax({
-      url: marpico_ajax.ajax_url,
-      type: "POST",
-      dataType: "json",
-      data: {
-        action: "marpico_aplicar_aumento", // coincide con PHP
-        security: marpico_ajax.nonce,
-        incremento: incremento, // monto fijo
-        marca: marca, // ID de la marca
-        categoriasExcluidas: excluidas, // array de categorías
-      },
-      beforeSend: function () {
-        console.log("Enviando petición AJAX...");
-      },
-      success: function (response) {
-        console.log("Respuesta del servidor:", response);
-        alert("Ajuste completado: " + response.data);
-
-        // Limpiar campos después de aplicar
-        $("#marpico_precio_incremento").val("");
-        $("#marpico_marca").val("");
-        $("input[name='excluded_categories[]']").prop("checked", false);
-      },
-      error: function (xhr, status, error) {
-        console.error("Error en AJAX:", error);
-        alert("Hubo un error al aplicar el aumento. Revisa la consola.");
-      },
-      complete: function () {
-        // Restaurar botón y quitar mensaje
-        boton.prop("disabled", false).text("Aplicar aumento");
-        $("#marpico_status_msg").text("Proceso completado");
-        setTimeout(() => $("#marpico_status_msg").fadeOut(), 2000);
-      },
-    });
-  });
-
-  $(document).on("click", "#marpico_aplicar_aumento_marca", function () {
-    console.log("Botón aumento por marca clickeado");
-
-    const porcentaje = parseFloat($("#marpico_porcentaje_incremento").val());
-    const marca = $("#marpico_marca_select").val();
-    const excluidas = $("input[name='excluded_categories_brand[]']:checked")
-      .map(function () {
-        return $(this).val();
-      })
-      .get();
-
-    const excluidasMarcas = $("input[name='excluded_brands[]']:checked")
-      .map(function () {
-        return $(this).val();
-      })
-      .get();
-
-    console.log("Porcentaje:", porcentaje);
-    console.log("Marca:", marca);
-    console.log("Categorías excluidas:", excluidas);
-    console.log("Marcas excluidas:", excluidasMarcas);
-
-    if (!porcentaje || porcentaje === 0) {
-      alert("Por favor ingresa un porcentaje válido.");
-      return;
-    }
-
-    if (!marca) {
-      alert("Debes seleccionar una marca.");
-      return;
-    }
-
-    const boton = $(this);
-    boton.prop("disabled", true).text("Aplicando aumento...");
-
-    $("#marpico_status_msg_marca").remove();
-
-    boton.after(
-      "<p id='marpico_status_msg_marca'>Aplicando aumento por marca, por favor espera...</p>",
-    );
-
-    $.ajax({
-      url: marpico_ajax.ajax_url,
-      type: "POST",
-      dataType: "json",
-      data: {
-        action: "marpico_aplicar_aumento_marca",
-        security: marpico_ajax.nonce,
-        porcentaje: porcentaje,
-        marca: marca,
-        categoriasExcluidas: excluidas,
-        marcasExcluidas: excluidasMarcas,
-      },
-
-      beforeSend: function () {
-        console.log("Enviando petición AJAX aumento por marca...");
-      },
-
-      success: function (response) {
-        console.log("Respuesta del servidor:", response);
-
-        alert("Ajuste por marca completado: " + response.data);
-
-        // limpiar campos
-        $("#marpico_porcentaje_incremento").val("");
-        $("#marpico_marca_select").val("");
-        $("input[name='excluded_categories[]']").prop("checked", false);
-      },
-
-      error: function (xhr, status, error) {
-        console.error("Error en AJAX:", error);
-        console.log(xhr.responseText);
-        alert("Hubo un error al aplicar el aumento.");
-      },
-
-      complete: function () {
-        boton.prop("disabled", false).text("Aplicar aumento por marca");
-
-        $("#marpico_status_msg_marca").text("Proceso completado");
-
-        setTimeout(() => $("#marpico_status_msg_marca").fadeOut(), 2000);
-      },
-    });
-  });
 
   // --- CDO: lanzar sincronización (catálogo completo) en segundo plano ---
   $("#test-provider").on("click", function (e) {

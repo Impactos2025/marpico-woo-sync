@@ -75,6 +75,7 @@ class Marpico_Sync_Job {
         $job = [
             'job_id'         => uniqid( 'msync_', true ),
             'token'          => wp_generate_password( 24, false ),
+            'kind'           => 'sync',
             'provider'       => $provider,
             'status'         => 'queued',
             'total'          => 0,
@@ -101,6 +102,7 @@ class Marpico_Sync_Job {
         $job['message'] = 'Iniciando…';
         self::save( $job );
 
+        Marpico_Logger::add( 'Sincronización iniciada', 'info', strtoupper( $provider ) );
         self::kick( $job['job_id'], 0 );
 
         return $job;
@@ -139,6 +141,57 @@ class Marpico_Sync_Job {
             ? min( 100, (int) round( $job['processed'] / $job['total'] * 100 ) )
             : 0;
         return $job;
+    }
+
+    /**
+     * Inicia "Aplicar ahora": aplica el ajuste de precios guardado a todo el
+     * catálogo, en segundo plano, con el mismo motor de jobs (kind='price').
+     * Comparte el único slot: no corre en paralelo con una sincronización.
+     */
+    public static function start_price_apply() {
+        $current = self::get();
+        if ( $current && in_array( $current['status'], [ 'queued', 'running', 'paused' ], true ) ) {
+            return new WP_Error( 'job_active', 'Ya hay un proceso en curso. Cancélalo antes de aplicar el ajuste de precios.' );
+        }
+
+        $job = [
+            'job_id'         => uniqid( 'mprice_', true ),
+            'token'          => wp_generate_password( 24, false ),
+            'kind'           => 'price',
+            'provider'       => 'price',
+            'status'         => 'queued',
+            'total'          => 0,
+            'processed'      => 0,
+            'successful'     => 0,
+            'failed'         => 0,
+            'current_offset' => 0,
+            'batch_size'     => 40,   // ajuste de precios es liviano (sin descargas)
+            'retries'        => 0,
+            'args'           => [],
+            'started_at'     => current_time( 'mysql' ),
+            'updated_at'     => current_time( 'mysql' ),
+            'last_error'     => '',
+            'message'        => 'En cola…',
+        ];
+
+        self::save( $job );
+        delete_transient( self::NOTICE );
+        delete_option( self::SIGNAL );
+        self::release_lock();
+
+        $job['status']  = 'running';
+        $job['message'] = 'Iniciando ajuste de precios…';
+        self::save( $job );
+
+        Marpico_Logger::add( 'Ajuste de precios iniciado', 'info', 'Precios' );
+        self::kick( $job['job_id'], 0 );
+
+        return $job;
+    }
+
+    /** Etiqueta de contexto para el registro de actividad. */
+    private static function ctx( $job ) {
+        return ( ( $job['kind'] ?? 'sync' ) === 'price' ) ? 'Precios' : strtoupper( $job['provider'] ?? '' );
     }
 
     /**
@@ -244,7 +297,7 @@ class Marpico_Sync_Job {
             // Señal de control llegada antes de este lote → aplicar sin procesar.
             if ( self::apply_signal( $job ) ) return;
 
-            $result = self::run_batch( self::make_sync( $job['provider'] ), $job, (int) $offset );
+            $result = self::run_batch( $job, (int) $offset );
 
             if ( is_wp_error( $result ) ) {
                 // Error transitorio del proveedor (p.ej. API 500): reintentar el MISMO
@@ -274,6 +327,13 @@ class Marpico_Sync_Job {
             $job['current_offset'] = (int) ( $result['next_offset'] ?? ( $offset + $job['batch_size'] ) );
             $job['updated_at']     = current_time( 'mysql' );
 
+            // Errores por-producto de este lote → registro de actividad (señal valiosa).
+            if ( ! empty( $result['errors'] ) && is_array( $result['errors'] ) ) {
+                foreach ( $result['errors'] as $err ) {
+                    Marpico_Logger::add( $err, 'error', self::ctx( $job ) );
+                }
+            }
+
             $has_more = ! empty( $result['has_more'] );
 
             // Señal de control llegada durante el lote → cancelar/pausar (guarda el avance).
@@ -286,8 +346,16 @@ class Marpico_Sync_Job {
                 self::kick( $job_id, (int) $job['current_offset'] );
             } else {
                 $job['status']  = 'completed';
-                $job['message'] = sprintf( 'Completada: %d productos (%d ok, %d con error).',
-                    $job['processed'], $job['successful'], $job['failed'] );
+                Marpico_Logger::add( '✓ ' . ( ( $job['kind'] ?? 'sync' ) === 'price' ? 'Ajuste de precios completado' : 'Sincronización completada' )
+                    . sprintf( ': %d procesados, %d ok, %d con error.', $job['processed'], $job['successful'], $job['failed'] ),
+                    'success', self::ctx( $job ) );
+                if ( ( $job['kind'] ?? 'sync' ) === 'price' ) {
+                    $job['message'] = sprintf( 'Completado: %d productos revisados, %d con precio actualizado.',
+                        $job['processed'], $job['successful'] );
+                } else {
+                    $job['message'] = sprintf( 'Completada: %d productos (%d ok, %d con error).',
+                        $job['processed'], $job['successful'], $job['failed'] );
+                }
                 self::save( $job );
                 self::set_notice( $job );
             }
@@ -308,6 +376,8 @@ class Marpico_Sync_Job {
         $job['message']    = ( $sig === 'cancel' ) ? 'Cancelada por el usuario.' : 'Pausada.';
         $job['updated_at'] = current_time( 'mysql' );
         self::save( $job );
+        Marpico_Logger::add( ( $sig === 'cancel' ? '⚠ Cancelada' : '⏸ Pausada' ) . sprintf( ' en %d/%d', $job['processed'], $job['total'] ),
+            'warning', self::ctx( $job ) );
         return true;
     }
 
@@ -340,15 +410,19 @@ class Marpico_Sync_Job {
         if ( ! $n ) return;
         delete_transient( self::NOTICE );
 
-        $class = ( ! empty( $n['failed'] ) || ( $n['status'] ?? '' ) === 'failed' ) ? 'notice-warning' : 'notice-success';
-        $prov  = esc_html( strtoupper( $n['provider'] ?? '' ) );
+        $class   = ( ! empty( $n['failed'] ) || ( $n['status'] ?? '' ) === 'failed' ) ? 'notice-warning' : 'notice-success';
+        $is_price = ( ( $n['kind'] ?? 'sync' ) === 'price' );
 
         if ( ( $n['status'] ?? '' ) === 'failed' ) {
-            $msg = sprintf( 'Sincronización %s detenida por error: %s (procesados %d).',
-                $prov, esc_html( $n['error'] ?? '' ), (int) ( $n['processed'] ?? 0 ) );
+            $proceso = $is_price ? 'Ajuste de precios' : ( 'Sincronización ' . strtoupper( $n['provider'] ?? '' ) );
+            $msg = sprintf( '%s detenido por error: %s (procesados %d).',
+                esc_html( $proceso ), esc_html( $n['error'] ?? '' ), (int) ( $n['processed'] ?? 0 ) );
+        } elseif ( $is_price ) {
+            $msg = sprintf( 'Ajuste de precios completado: %d productos revisados, %d actualizados.',
+                (int) ( $n['processed'] ?? 0 ), (int) ( $n['successful'] ?? 0 ) );
         } else {
             $msg = sprintf( 'Sincronización %s completada: %d productos (%d ok, %d con error).',
-                $prov, (int) ( $n['processed'] ?? 0 ), (int) ( $n['successful'] ?? 0 ), (int) ( $n['failed'] ?? 0 ) );
+                esc_html( strtoupper( $n['provider'] ?? '' ) ), (int) ( $n['processed'] ?? 0 ), (int) ( $n['successful'] ?? 0 ), (int) ( $n['failed'] ?? 0 ) );
         }
 
         printf( '<div class="notice %s is-dismissible"><p><strong>Marpico Woo Sync:</strong> %s</p></div>',
@@ -366,6 +440,7 @@ class Marpico_Sync_Job {
         $job['message']    = 'Detenida por error en offset ' . $offset . '.';
         $job['updated_at'] = current_time( 'mysql' );
         self::save( $job );
+        Marpico_Logger::add( '❌ Detenida por error en offset ' . $offset . ': ' . $message, 'error', self::ctx( $job ) );
         self::set_notice( $job );
     }
 
@@ -428,9 +503,16 @@ class Marpico_Sync_Job {
         }
     }
 
-    /** Adaptador: llama al método del proveedor con sus args; todos devuelven la misma forma. */
-    private static function run_batch( $sync, $job, $offset ) {
+    /** Adaptador: ejecuta un lote según el tipo de trabajo; todos devuelven la misma forma. */
+    private static function run_batch( $job, $offset ) {
         $batch = (int) $job['batch_size'];
+
+        // Trabajo de ajuste de precios (no es sync de proveedor).
+        if ( ( $job['kind'] ?? 'sync' ) === 'price' ) {
+            return self::run_price_batch( $offset, $batch );
+        }
+
+        $sync = self::make_sync( $job['provider'] );
         switch ( $job['provider'] ) {
             case 'beststock':
                 $a = $job['args'];
@@ -442,6 +524,39 @@ class Marpico_Sync_Job {
             default:
                 return $sync->sync_all_products( $offset, $batch );
         }
+    }
+
+    /** Lote de "Aplicar ahora": recorre productos por offset y aplica el motor de precios. */
+    private static function run_price_batch( $offset, $batch ) {
+        $q = new WP_Query( [
+            'post_type'      => 'product',
+            'post_status'    => 'publish',
+            'fields'         => 'ids',
+            'posts_per_page' => $batch,
+            'offset'         => $offset,
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+            'no_found_rows'  => false,
+        ] );
+
+        $total     = (int) $q->found_posts;
+        $processed = 0;
+        $touched   = 0;
+
+        foreach ( $q->posts as $pid ) {
+            $processed++;
+            if ( Marpico_Price_Engine::apply_to_product( $pid ) ) $touched++;
+        }
+
+        return [
+            'processed'   => $processed,
+            'successful'  => $touched,
+            'failed'      => 0,
+            'total'       => $total,
+            'offset'      => $offset,
+            'next_offset' => $offset + $batch,
+            'has_more'    => ( $offset + $batch ) < $total,
+        ];
     }
 
     /** Sanea los args específicos del proveedor. */
@@ -458,6 +573,7 @@ class Marpico_Sync_Job {
 
     private static function set_notice( $job ) {
         set_transient( self::NOTICE, [
+            'kind'       => $job['kind'] ?? 'sync',
             'provider'   => $job['provider'],
             'processed'  => $job['processed'],
             'successful' => $job['successful'],

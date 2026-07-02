@@ -30,6 +30,18 @@ class Marpico_Admin {
         add_action( 'wp_ajax_marpico_sync_pause',  [ $this, 'ajax_sync_pause' ] );
         add_action( 'wp_ajax_marpico_sync_resume', [ $this, 'ajax_sync_resume' ] );
 
+        // Ajuste de precios unificado
+        add_action( 'wp_ajax_marpico_price_save',        [ $this, 'ajax_price_save' ] );
+        add_action( 'wp_ajax_marpico_price_apply_start', [ $this, 'ajax_price_apply_start' ] );
+
+        // Programación de sincronizaciones
+        add_action( 'wp_ajax_marpico_schedule_save',    [ $this, 'ajax_schedule_save' ] );
+        add_action( 'wp_ajax_marpico_schedule_run_now', [ $this, 'ajax_schedule_run_now' ] );
+
+        // Registro de actividad
+        add_action( 'wp_ajax_marpico_get_logs',   [ $this, 'ajax_get_logs' ] );
+        add_action( 'wp_ajax_marpico_clear_logs', [ $this, 'ajax_clear_logs' ] );
+
         // Reconciliación de categorías (mapeo multi-proveedor)
         add_action( 'wp_ajax_marpico_category_reconcile', [ $this, 'ajax_category_reconcile' ] );
         add_action( 'wp_ajax_marpico_category_map_save', [ $this, 'ajax_category_map_save' ] );
@@ -686,6 +698,103 @@ class Marpico_Admin {
         ] );
     }
 
+    /* ===================== Registro de actividad ===================== */
+
+    /** AJAX: devuelve las entradas del registro + conteos por nivel. */
+    public function ajax_get_logs() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+
+        wp_send_json_success( [
+            'entries' => Marpico_Logger::all( 300 ),
+            'counts'  => Marpico_Logger::counts(),
+        ] );
+    }
+
+    /** AJAX: vacía el registro. */
+    public function ajax_clear_logs() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+
+        Marpico_Logger::clear();
+        wp_send_json_success( [ 'entries' => [], 'counts' => Marpico_Logger::counts() ] );
+    }
+
+    /* ===================== Programación ===================== */
+
+    /** AJAX: guarda la programación y re-registra los eventos cron. */
+    public function ajax_schedule_save() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+
+        $raw   = isset( $_POST['schedules'] ) && is_array( $_POST['schedules'] ) ? wp_unslash( $_POST['schedules'] ) : [];
+        $clean = Marpico_Scheduler::save( $raw );
+
+        $next = [];
+        foreach ( Marpico_Scheduler::providers() as $p ) {
+            $ts = Marpico_Scheduler::next_run( $p );
+            $next[ $p ] = $ts ? get_date_from_gmt( gmdate( 'Y-m-d H:i:s', $ts ), 'Y-m-d H:i' ) : '';
+        }
+
+        wp_send_json_success( [ 'schedules' => $clean, 'next' => $next ] );
+    }
+
+    /** AJAX: "Ejecutar ahora" — arranca el sync del proveedor de inmediato. */
+    public function ajax_schedule_run_now() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+
+        $provider = sanitize_key( $_POST['provider'] ?? '' );
+        if ( ! in_array( $provider, Marpico_Scheduler::providers(), true ) ) {
+            wp_send_json_error( 'Proveedor no programable.' );
+        }
+
+        $job = Marpico_Sync_Job::start( $provider );
+        if ( is_wp_error( $job ) ) {
+            wp_send_json_error( $job->get_error_message() );
+        }
+        wp_send_json_success( Marpico_Sync_Job::status() );
+    }
+
+    /* ===================== Ajuste de precios ===================== */
+
+    /** AJAX: guarda la configuración de ajuste de precios. */
+    public function ajax_price_save() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+
+        $config = Marpico_Price_Engine::save( [
+            'monto'             => $_POST['monto'] ?? 0,
+            'porcentaje'        => $_POST['porcentaje'] ?? 0,
+            'excluir_cats'      => (array) ( $_POST['excluir_cats'] ?? [] ),
+            'marcas_porcentaje' => (array) ( $_POST['marcas_porcentaje'] ?? [] ),
+            'excluir_marcas'    => (array) ( $_POST['excluir_marcas'] ?? [] ),
+        ] );
+
+        wp_send_json_success( $config );
+    }
+
+    /** AJAX: guarda la config y lanza "Aplicar ahora" en segundo plano. */
+    public function ajax_price_apply_start() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'No permission' );
+        check_ajax_referer( 'marpico_sync_nonce', 'security' );
+
+        // Guardar primero la config actual del formulario, luego aplicar.
+        Marpico_Price_Engine::save( [
+            'monto'             => $_POST['monto'] ?? 0,
+            'porcentaje'        => $_POST['porcentaje'] ?? 0,
+            'excluir_cats'      => (array) ( $_POST['excluir_cats'] ?? [] ),
+            'marcas_porcentaje' => (array) ( $_POST['marcas_porcentaje'] ?? [] ),
+            'excluir_marcas'    => (array) ( $_POST['excluir_marcas'] ?? [] ),
+        ] );
+
+        $job = Marpico_Sync_Job::start_price_apply();
+        if ( is_wp_error( $job ) ) {
+            wp_send_json_error( $job->get_error_message() );
+        }
+        wp_send_json_success( Marpico_Sync_Job::status() );
+    }
+
     /* ===================== Sincronización en segundo plano ===================== */
 
     /** AJAX: inicia un trabajo de sync en background para el proveedor indicado. */
@@ -740,13 +849,6 @@ class Marpico_Admin {
     }
 
     private function log_sync_event( $message, $type = 'info' ) {
-        $log = get_option( 'marpico_sync_log', [] );
-        $timestamp = current_time( 'Y-m-d H:i:s' );
-        $log_entry = "[{$timestamp}] {$message}";
-        array_unshift( $log, $log_entry );
-        if ( count( $log ) > 100 ) {
-            $log = array_slice( $log, 0, 100 );
-        }
-        update_option( 'marpico_sync_log', $log );
+        Marpico_Logger::add( $message, $type === 'info' ? 'auto' : $type, 'Manual' );
     }
 }

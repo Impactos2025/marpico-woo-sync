@@ -20,6 +20,7 @@ define( 'MARPICO_WOO_SYNC_PATH', plugin_dir_path( __FILE__ ) );
 define( 'MARPICO_WOO_SYNC_URL',  plugin_dir_url( __FILE__ ) );
 
 // includes
+require_once MARPICO_WOO_SYNC_PATH . 'includes/class-logger.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-category-mapper.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-marpico-client.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-marpico-sync.php';
@@ -31,7 +32,9 @@ require_once MARPICO_WOO_SYNC_PATH . 'includes/class-price.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-price-percentage.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-cdo-client.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-cdo-sync.php';
+require_once MARPICO_WOO_SYNC_PATH . 'includes/class-price-engine.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-sync-job.php';
+require_once MARPICO_WOO_SYNC_PATH . 'includes/class-scheduler.php';
 
 if ( is_admin() ) {
     require_once MARPICO_WOO_SYNC_PATH . 'includes/github-updater.php';
@@ -44,9 +47,9 @@ if ( is_admin() ) {
 // init admin
 add_action( 'plugins_loaded', function() {
     new Marpico_Admin();
-    new Marpico_Price();
-    new Marpico_Price_Brand_Percentage();
+    // Ajuste de precios unificado (reemplaza Marpico_Price y Marpico_Price_Brand_Percentage).
     Marpico_Sync_Job::init();
+    Marpico_Scheduler::init();
 });
 
 add_action('admin_enqueue_scripts', function() {

@@ -112,10 +112,10 @@ class Marpico_Sync {
                 }
 
                 update_post_meta( $product_id, "_marpico_{$key}", $value );
-                $this->log( "GUARDADO: _marpico_{$key} => {$value}" );
-            } else {
-
-                $this->log( "CLAVE AUSENTE: {$key} (no se sobrescribe)" );
+                // Detalle por-campo: solo en depuración (evita inundar el registro).
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                    error_log( "Marpico Sync GUARDADO: _marpico_{$key} => {$value}" );
+                }
             }
         }
 
@@ -219,6 +219,9 @@ class Marpico_Sync {
         $this->assign_fixed_brand_to_product($product_id);
 
         $this->sync_product_variations_optimized( $product_id, $first, $title );
+
+        // Aplicar el ajuste de precios guardado (desde la base recién sembrada).
+        Marpico_Price_Engine::apply_to_product( $product_id );
 
         wc_delete_product_transients( $product_id );
 
@@ -398,6 +401,11 @@ class Marpico_Sync {
 
             } else {
                 error_log("Marpico Sync: Variación {$color_name} sin cambios, se mantiene igual");
+            }
+
+            // Sembrar el precio base del API (para el motor de ajuste de precios).
+            if ( $variation_id ) {
+                Marpico_Price_Engine::seed_base( $variation_id, $variation_data['price'] );
             }
         }
         // Guardar la galería una sola vez, sin duplicados
@@ -676,9 +684,8 @@ class Marpico_Sync {
     }
     
     private function log( $message ) {
-        $log = get_option( 'marpico_sync_log', [] );
-        $log[] = '[' . current_time('mysql') . '] ' . $message;
-        if ( count( $log ) > 200 ) $log = array_slice( $log, -200 );
-        update_option( 'marpico_sync_log', $log );
+        // Detalle por-producto: canal de depuración. El registro de actividad
+        // (Marpico_Logger) lo alimenta el motor de jobs con eventos de alto nivel.
+        error_log( 'Marpico Sync: ' . $message );
     }
 }

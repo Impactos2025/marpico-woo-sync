@@ -163,8 +163,11 @@ class CDO_Sync {
             // recalcular stock del producto variable
             wc_delete_product_transients($product_id);
             WC_Product_Variable::sync($product_id);
-            
+
         }
+
+        // Aplicar el ajuste de precios guardado (desde la base recién sembrada).
+        Marpico_Price_Engine::apply_to_product($product_id);
     }
 
     private function find_product_by_code($code) {
@@ -348,6 +351,9 @@ class CDO_Sync {
                 update_post_meta( $variation_id, '_sku', $variation_data['sku'] );
                 update_post_meta( $variation_id, '_regular_price', $variation_data['price'] );
                 update_post_meta( $variation_id, '_price', $variation_data['price'] );
+
+                // Precio base del API para el motor de ajuste de precios.
+                Marpico_Price_Engine::seed_base( $variation_id, $variation_data['price'] );
 
                 update_post_meta( $variation_id, '_stock', $variation_data['stock'] );
                 update_post_meta( $variation_id, '_manage_stock', 'yes' );
@@ -625,9 +631,8 @@ class CDO_Sync {
     }
 
     private function log( $message ) {
-        $log = get_option( 'cdo_sync_log', [] );
-        $log[] = '[' . current_time('mysql') . '] ' . $message;
-        if ( count( $log ) > 200 ) $log = array_slice( $log, -200 );
-        update_option( 'cdo_sync_log', $log );
+        // Detalle por-producto → canal de depuración (el registro de actividad
+        // lo alimenta el motor de jobs con eventos de alto nivel).
+        error_log( 'CDO Sync: ' . $message );
     }
 }

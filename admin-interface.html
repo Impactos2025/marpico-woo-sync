@@ -71,15 +71,15 @@
                 </a>
                 <a href="#price" class="marpico-nav-item" data-section="price">
                     <span class="marpico-nav-icon">
-                        <i data-lucide="package"></i>
+                        <i data-lucide="badge-dollar-sign"></i>
                     </span>
-                    Ajuste precio x (Monto)
+                    Ajuste de precios
                 </a>
-                <a href="#brand" class="marpico-nav-item" data-section="brand">
+                <a href="#schedule" class="marpico-nav-item" data-section="schedule">
                     <span class="marpico-nav-icon">
-                        <i data-lucide="package"></i>
+                        <i data-lucide="calendar-clock"></i>
                     </span>
-                    Ajuste precio x (%)
+                    Programación
                 </a>
                 <a href="#logs" class="marpico-nav-item" data-section="logs">
                     <span class="marpico-nav-icon">
@@ -108,15 +108,151 @@
 
         <!-- Sección: Resumen General -->
         <div id="section-overview" class="marpico-content-section">
-            <div class="marpico-card">
-                <div class="marpico-card-header">
-                    <h2 class="marpico-card-title">
-                        <span class="marpico-card-icon">
-                          <i data-lucide="chart-no-axes-column"></i>
-                        </span>
-                        Estadísticas
-                    </h2>
+            <?php
+                // ---- Datos del resumen ----
+                $ov_counts = wp_count_posts( 'product' );
+                $ov_pub    = isset( $ov_counts->publish ) ? (int) $ov_counts->publish : 0;
+                $ov_draft  = isset( $ov_counts->draft ) ? (int) $ov_counts->draft : 0;
+
+                $ov_brands = get_terms( [ 'taxonomy' => 'product_brand', 'hide_empty' => false ] );
+                if ( is_wp_error( $ov_brands ) ) $ov_brands = [];
+                $ov_catcount = wp_count_terms( [ 'taxonomy' => 'product_cat', 'hide_empty' => false ] );
+                if ( is_wp_error( $ov_catcount ) ) $ov_catcount = 0;
+
+                $ov_job   = Marpico_Sync_Job::status();
+                $ov_sched = Marpico_Scheduler::get();
+                $ov_price = Marpico_Price_Engine::get();
+                $ov_active = get_option( 'marpico_active_provider', 'marpico' );
+
+                $ov_api = [
+                    'Marpico'   => [ get_option( 'marpico_api_endpoint' ), get_option( 'marpico_api_token' ) ],
+                    'CDO'       => [ get_option( 'cdo_api_endpoint' ), get_option( 'cdo_api_token' ) ],
+                    'BestStock' => [ get_option( 'beststock_api_endpoint' ), null ],
+                ];
+
+                // Estado de sincronización → texto + color.
+                $ov_st = $ov_job['status'] ?? 'idle';
+                $ov_prov = strtoupper( $ov_job['provider'] ?? '' );
+                if ( in_array( $ov_st, [ 'running', 'queued' ], true ) ) {
+                    $ov_sync_txt = sprintf( '⏳ Sincronizando %s — %d%% (%d/%d)', $ov_prov, $ov_job['percent'] ?? 0, $ov_job['processed'] ?? 0, $ov_job['total'] ?? 0 );
+                    $ov_sync_col = '#2271b1';
+                } elseif ( $ov_st === 'paused' ) {
+                    $ov_sync_txt = sprintf( '⏸ %s pausada en %d/%d', $ov_prov, $ov_job['processed'] ?? 0, $ov_job['total'] ?? 0 );
+                    $ov_sync_col = '#d97706';
+                } elseif ( $ov_st === 'failed' ) {
+                    $ov_sync_txt = sprintf( '❌ %s detenida por error (%d/%d)', $ov_prov, $ov_job['processed'] ?? 0, $ov_job['total'] ?? 0 );
+                    $ov_sync_col = '#ef4444';
+                } elseif ( $ov_st === 'completed' ) {
+                    $ov_sync_txt = sprintf( '✓ Última: %s — %d productos (%s)', $ov_prov, $ov_job['processed'] ?? 0, $ov_job['updated_at'] ?? '' );
+                    $ov_sync_col = '#16a34a';
+                } elseif ( $ov_st === 'canceled' ) {
+                    $ov_sync_txt = sprintf( '⚠ Última: %s cancelada (%d/%d)', $ov_prov, $ov_job['processed'] ?? 0, $ov_job['total'] ?? 0 );
+                    $ov_sync_col = '#d97706';
+                } else {
+                    $ov_sync_txt = 'Sin sincronizaciones recientes.';
+                    $ov_sync_col = '#666';
+                }
+
+                $ov_freq_lbl = [ 'hourly' => 'Cada hora', 'every6h' => 'Cada 6 h', 'every12h' => 'Cada 12 h', 'daily' => 'Diaria', 'weekly' => 'Semanal' ];
+            ?>
+
+            <div style="display:flex;flex-wrap:wrap;gap:16px;">
+
+                <!-- Productos -->
+                <div class="marpico-card" style="flex:1 1 320px;">
+                    <div class="marpico-card-header">
+                        <h2 class="marpico-card-title"><span class="marpico-card-icon"><i data-lucide="package"></i></span> Productos</h2>
+                    </div>
+                    <div style="padding:4px 2px;">
+                        <div style="font-size:34px;font-weight:700;line-height:1;"><?php echo esc_html( number_format_i18n( $ov_pub ) ); ?></div>
+                        <div style="color:#666;font-size:13px;margin-bottom:12px;">publicados<?php echo $ov_draft ? ' · ' . esc_html( number_format_i18n( $ov_draft ) ) . ' borradores' : ''; ?> · <?php echo esc_html( number_format_i18n( $ov_catcount ) ); ?> categorías</div>
+                        <table class="widefat striped" style="border:0;">
+                            <tbody>
+                            <?php foreach ( $ov_brands as $b ) : ?>
+                                <tr>
+                                    <td><?php echo esc_html( $b->name ); ?></td>
+                                    <td style="text-align:right;font-weight:600;"><?php echo esc_html( number_format_i18n( $b->count ) ); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            <?php if ( empty( $ov_brands ) ) : ?>
+                                <tr><td colspan="2"><em>Sin marcas.</em></td></tr>
+                            <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
+
+                <!-- Sincronización -->
+                <div class="marpico-card" style="flex:1 1 320px;">
+                    <div class="marpico-card-header">
+                        <h2 class="marpico-card-title"><span class="marpico-card-icon"><i data-lucide="folder-sync"></i></span> Sincronización</h2>
+                    </div>
+                    <div style="padding:4px 2px;">
+                        <p style="font-size:15px;color:<?php echo esc_attr( $ov_sync_col ); ?>;font-weight:600;margin:6px 0 14px;"><?php echo esc_html( $ov_sync_txt ); ?></p>
+                        <a href="#sync" class="marpico-btn marpico-btn-primary ov-goto" data-goto="sync">Ir a Sincronización</a>
+                    </div>
+                </div>
+
+                <!-- Programación -->
+                <div class="marpico-card" style="flex:1 1 320px;">
+                    <div class="marpico-card-header">
+                        <h2 class="marpico-card-title"><span class="marpico-card-icon"><i data-lucide="calendar-clock"></i></span> Programación</h2>
+                    </div>
+                    <div style="padding:4px 2px;">
+                        <?php foreach ( [ 'marpico' => 'Marpico', 'cdo' => 'CDO' ] as $pk => $pl ) :
+                            $s  = $ov_sched[ $pk ];
+                            $nx = Marpico_Scheduler::next_run( $pk );
+                            $nxT = $nx ? get_date_from_gmt( gmdate( 'Y-m-d H:i:s', $nx ), 'Y-m-d H:i' ) : '—';
+                        ?>
+                            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f0f0;">
+                                <span><strong><?php echo esc_html( $pl ); ?></strong></span>
+                                <span style="text-align:right;">
+                                    <?php if ( ! empty( $s['enabled'] ) ) : ?>
+                                        <span style="color:#16a34a;">● <?php echo esc_html( $ov_freq_lbl[ $s['frequency'] ] ?? $s['frequency'] ); ?></span><br>
+                                        <small style="color:#666;">Próxima: <?php echo esc_html( $nxT ); ?></small>
+                                    <?php else : ?>
+                                        <span style="color:#999;">○ Desactivada</span>
+                                    <?php endif; ?>
+                                </span>
+                            </div>
+                        <?php endforeach; ?>
+                        <a href="#schedule" class="marpico-btn ov-goto" data-goto="schedule" style="margin-top:12px;">Configurar</a>
+                    </div>
+                </div>
+
+                <!-- Ajuste de precios -->
+                <div class="marpico-card" style="flex:1 1 320px;">
+                    <div class="marpico-card-header">
+                        <h2 class="marpico-card-title"><span class="marpico-card-icon"><i data-lucide="badge-dollar-sign"></i></span> Ajuste de precios</h2>
+                    </div>
+                    <div style="padding:4px 2px;font-size:14px;line-height:1.9;">
+                        <div>Monto fijo: <strong><?php echo $ov_price['monto'] ? '$' . esc_html( number_format_i18n( $ov_price['monto'], 2 ) ) : '—'; ?></strong></div>
+                        <div>Porcentaje: <strong><?php echo $ov_price['porcentaje'] ? esc_html( $ov_price['porcentaje'] ) . '%' : '—'; ?></strong> <small style="color:#666;">a <?php echo count( $ov_price['marcas_porcentaje'] ); ?> marca(s)</small></div>
+                        <div>Excluidas: <strong><?php echo count( $ov_price['excluir_cats'] ); ?></strong> categoría(s), <strong><?php echo count( $ov_price['excluir_marcas'] ); ?></strong> marca(s)</div>
+                        <a href="#price" class="marpico-btn ov-goto" data-goto="price" style="margin-top:12px;">Editar</a>
+                    </div>
+                </div>
+
+                <!-- Configuración API -->
+                <div class="marpico-card" style="flex:1 1 320px;">
+                    <div class="marpico-card-header">
+                        <h2 class="marpico-card-title"><span class="marpico-card-icon"><i data-lucide="code-xml"></i></span> Configuración de API</h2>
+                    </div>
+                    <div style="padding:4px 2px;">
+                        <?php foreach ( $ov_api as $name => $vals ) :
+                            $has_ep  = ! empty( $vals[0] );
+                            $has_tok = ( $vals[1] === null ) ? true : ! empty( $vals[1] );
+                            $ok = $has_ep && $has_tok;
+                        ?>
+                            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f0f0;">
+                                <span><?php echo esc_html( $name ); ?><?php echo ( strtolower( $name ) === $ov_active ) ? ' <small style="color:#2271b1;">(activo)</small>' : ''; ?></span>
+                                <span style="color:<?php echo $ok ? '#16a34a' : '#ef4444'; ?>;"><?php echo $ok ? '✓ Configurado' : ( $has_ep ? '⚠ Falta token' : '✗ Sin configurar' ); ?></span>
+                            </div>
+                        <?php endforeach; ?>
+                        <a href="#api-config" class="marpico-btn ov-goto" data-goto="api-config" style="margin-top:12px;">Editar</a>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -409,224 +545,173 @@
             </div>
         </div>
 
-        <!-- Sección: Price (Marpico) -->
+        <!-- Sección: Ajuste de precios (unificado) -->
         <div id="section-price" class="marpico-content-section" style="display: none;">
             <div class="marpico-card">
                 <div class="marpico-card-header">
                     <h2 class="marpico-card-title">
-                        <span class="marpico-card-icon">
-                            <i data-lucide="logs"></i>
-                        </span>
-                        Ajuste global de precios por marca
+                        <span class="marpico-card-icon"><i data-lucide="badge-dollar-sign"></i></span>
+                        Ajuste de precios
                     </h2>
                 </div>
-                <div id="ajuste-precios-section" class="marpico-section">
-                    
-                    <!-- Selección de marca -->
-                    <p><strong>Selecciona la marca:</strong></p>
-                    <select id="marpico_marca" style="width: 100%; padding: 4px; margin-bottom: 10px;">
-                        <option value="">-- Selecciona una marca --</option>
-                        <?php
-                        $brands = get_terms([
-                            'taxonomy'   => 'product_brand',
-                            'hide_empty' => false,
-                        ]);
 
-                        if (!empty($brands) && !is_wp_error($brands)) {
-                            foreach ($brands as $brand) {
-                                echo '<option value="' . esc_attr($brand->term_id) . '">' . esc_html($brand->name) . '</option>';
-                            }
-                        }
-                        ?>
-                    </select>
+                <?php
+                    $price_cfg  = Marpico_Price_Engine::get();
+                    $pc_cats    = array_map( 'intval', $price_cfg['excluir_cats'] );
+                    $pc_pctb    = array_map( 'intval', $price_cfg['marcas_porcentaje'] );
+                    $pc_exclb   = array_map( 'intval', $price_cfg['excluir_marcas'] );
+                    $pc_brands  = get_terms( [ 'taxonomy' => 'product_brand', 'hide_empty' => false ] );
+                    if ( is_wp_error( $pc_brands ) )  $pc_brands  = [];
+                    $pc_parents = get_terms( [ 'taxonomy' => 'product_cat', 'hide_empty' => false, 'parent' => 0 ] );
+                    if ( is_wp_error( $pc_parents ) ) $pc_parents = [];
+                ?>
 
-                    <!-- Incremento -->
-                    <p>Ingresa el valor a sumar a los productos seleccionados:</p>
-                    <input type="number" id="marpico_precio_incremento" placeholder="Ej. 1500" style="width: 100%; padding: 4px;" />
+                <div class="marpico-section" style="max-width:760px">
 
-                    <!-- Exclusión de categorías -->
-                    <p><strong>Excluir categorías:</strong></p>
-                    <div id="marpico_categoria_excluir">
-                        <?php
-                        $product_categories = get_terms([
-                            'taxonomy'   => 'product_cat',
-                            'hide_empty' => false,
-                            'parent'     => 0,
-                        ]);
+                    <!-- 1) MONTO -->
+                    <h3>&#9312; Incremento por monto <small style="font-weight:normal;color:#666">(todas las marcas)</small></h3>
+                    <p>Monto fijo a sumar ($):</p>
+                    <input type="number" id="price-monto" step="0.01" value="<?php echo esc_attr( $price_cfg['monto'] ); ?>"
+                        placeholder="Ej. 1500" style="width:100%;padding:6px;margin-bottom:12px;">
 
-                        if (!empty($product_categories) && !is_wp_error($product_categories)) {
-                            foreach ($product_categories as $parent_cat) {
-                                echo '<div class="marpico-cat-parent">';
-                                echo '<label style="display:block; margin-bottom:4px;">
-                                        <input type="checkbox" name="excluded_categories[]" value="' . esc_attr($parent_cat->term_id) . '">
-                                        <strong>' . esc_html($parent_cat->name) . '</strong>
-                                    </label>';
-
-                                // Subcategorías
-                                $child_cats = get_terms([
-                                    'taxonomy'   => 'product_cat',
-                                    'hide_empty' => false,
-                                    'parent'     => $parent_cat->term_id,
-                                ]);
-
-                                if (!empty($child_cats) && !is_wp_error($child_cats)) {
-                                    echo '<div style="margin-left: 20px;">';
-                                    foreach ($child_cats as $child_cat) {
-                                        echo '<label style="display:block;">
-                                                <input type="checkbox" name="excluded_categories[]" value="' . esc_attr($child_cat->term_id) . '">
-                                                ' . esc_html($child_cat->name) . '
-                                            </label>';
-                                    }
-                                    echo '</div>';
-                                }
-
-                                echo '</div>';
-                            }
-                        } else {
-                            echo '<p>No hay categorías disponibles.</p>';
-                        }
-                        ?>
+                    <p><strong>Excluir categorías</strong> <small style="color:#666">(no reciben el monto)</small></p>
+                    <div id="price-excluir-cats" style="max-height:240px;overflow:auto;border:1px solid #ddd;padding:8px;border-radius:6px;">
+                        <?php foreach ( $pc_parents as $parent ) : ?>
+                            <div class="marpico-cat-parent">
+                                <label style="display:block;margin-bottom:4px;">
+                                    <input type="checkbox" name="excluir_cats[]" value="<?php echo esc_attr( $parent->term_id ); ?>" <?php checked( in_array( (int) $parent->term_id, $pc_cats, true ) ); ?>>
+                                    <strong><?php echo esc_html( $parent->name ); ?></strong>
+                                </label>
+                                <?php
+                                    $childs = get_terms( [ 'taxonomy' => 'product_cat', 'hide_empty' => false, 'parent' => $parent->term_id ] );
+                                    if ( ! is_wp_error( $childs ) && $childs ) : ?>
+                                    <div style="margin-left:20px;">
+                                        <?php foreach ( $childs as $child ) : ?>
+                                            <label style="display:block;">
+                                                <input type="checkbox" name="excluir_cats[]" value="<?php echo esc_attr( $child->term_id ); ?>" <?php checked( in_array( (int) $child->term_id, $pc_cats, true ) ); ?>>
+                                                <?php echo esc_html( $child->name ); ?>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
                     </div>
 
-                    <button id="marpico_aplicar_aumento" class="button button-primary" style="margin-top:10px;">Aplicar aumento</button>
+                    <!-- 2) PORCENTAJE -->
+                    <h3 style="margin-top:20px;">&#9313; Incremento por porcentaje <small style="font-weight:normal;color:#666">(marcas con precio de distribuidor)</small></h3>
+                    <p>Porcentaje a aplicar (%):</p>
+                    <input type="number" id="price-porcentaje" step="0.1" value="<?php echo esc_attr( $price_cfg['porcentaje'] ); ?>"
+                        placeholder="Ej. 10" style="width:100%;padding:6px;margin-bottom:12px;">
+
+                    <p><strong>Marcas que reciben el %</strong></p>
+                    <div id="price-marcas-pct" style="border:1px solid #ddd;padding:8px;border-radius:6px;">
+                        <?php foreach ( $pc_brands as $b ) : $excl = in_array( (int) $b->term_id, $pc_exclb, true ); ?>
+                            <label class="pc-brand-pct-<?php echo esc_attr( $b->term_id ); ?>" style="display:block;margin-bottom:4px;<?php echo $excl ? 'opacity:.5' : ''; ?>">
+                                <input type="checkbox" name="marcas_porcentaje[]" value="<?php echo esc_attr( $b->term_id ); ?>" <?php checked( in_array( (int) $b->term_id, $pc_pctb, true ) ); ?> <?php disabled( $excl ); ?>>
+                                <?php echo esc_html( $b->name ); ?>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <!-- 3) EXCLUIR MARCAS -->
+                    <h3 style="margin-top:20px;">&#9314; Excluir marcas <small style="font-weight:normal;color:#666">(productos manuales, sin ajuste)</small></h3>
+                    <div id="price-excluir-marcas" style="border:1px solid #ddd;padding:8px;border-radius:6px;">
+                        <?php foreach ( $pc_brands as $b ) : ?>
+                            <label style="display:block;margin-bottom:4px;">
+                                <input type="checkbox" class="price-excl-brand" name="excluir_marcas[]" value="<?php echo esc_attr( $b->term_id ); ?>" data-brand="<?php echo esc_attr( $b->term_id ); ?>" <?php checked( in_array( (int) $b->term_id, $pc_exclb, true ) ); ?>>
+                                <?php echo esc_html( $b->name ); ?>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <div style="margin-top:20px;">
+                        <button id="price-save" class="marpico-btn marpico-btn-primary">Guardar configuración</button>
+                        <button id="price-apply" class="marpico-btn" style="margin-left:8px;background:#0073aa;color:#fff;">Aplicar ahora</button>
+                    </div>
+                    <div id="price-save-msg" style="margin-top:10px;"></div>
+                    <div id="marpico-price-status" style="margin-top:16px;"></div>
                 </div>
             </div>
         </div>
 
-        <!-- Sección: Price Marca -->
-        <div id="section-brand" class="marpico-content-section" style="display: none;">
+        <!-- Sección: Programación -->
+        <div id="section-schedule" class="marpico-content-section" style="display: none;">
             <div class="marpico-card">
                 <div class="marpico-card-header">
                     <h2 class="marpico-card-title">
-                        <span class="marpico-card-icon">
-                            <i data-lucide="logs"></i>
-                        </span>
-                        Ajuste de precios por marca
+                        <span class="marpico-card-icon"><i data-lucide="calendar-clock"></i></span>
+                        Programación de sincronizaciones
                     </h2>
                 </div>
 
-                <div id="ajuste-precios-marca-section" class="marpico-section">
-
-                    <p>Selecciona la marca:</p>
-
-                    <select id="marpico_marca_select">
-
-                    <?php
-                    $brands = get_terms([
-                        'taxonomy'   => 'product_brand',
-                        'hide_empty' => false
-                    ]);
-
-                    foreach ($brands as $brand) {
-                        echo '<option value="' . esc_attr($brand->term_id) . '">'
-                            . esc_html($brand->name) .
-                            '</option>';
-                    }
-                    ?>
-
-                    </select>
-
-                    <p>Porcentaje de aumento:</p>
-
-                    <input 
-                        type="number" 
-                        id="marpico_porcentaje_incremento" 
-                        placeholder="Ej. 10" 
-                        step="0.1"
-                    />
-
-                    <p style="font-size:12px;color:#666;">
-                        Ejemplo: si ingresas <strong>10</strong> el precio aumentará un <strong>10%</strong>
+                <div class="marpico-section" style="max-width:760px">
+                    <p style="background:#fff8e1;border:1px solid #ffe08a;padding:8px 12px;border-radius:6px;font-size:13px;">
+                        ⚠ La programación usa WP-Cron: dispara con el tráfico del sitio o con un cron real
+                        (en producción, un cron de cPanel a <code>wp-cron.php</code>). BestStock no se programa
+                        (sincroniza por categoría).
                     </p>
 
-                    <p><strong>Excluir marcas:</strong></p>
-
-                    <div id="marpico_marcas_excluir">
-
-                        <?php
-                        $brands = get_terms([
-                            'taxonomy'   => 'product_brand',
-                            'hide_empty' => false
-                        ]);
-
-                        if (!empty($brands) && !is_wp_error($brands)) {
-
-                            foreach ($brands as $brand) {
-
-                                echo '<label style="display:block; margin-bottom:4px;">
-                                        <input type="checkbox" name="excluded_brands[]" value="' . esc_attr($brand->term_id) . '">
-                                        ' . esc_html($brand->name) . '
-                                    </label>';
-
-                            }
-
-                        } else {
-                            echo '<p>No hay marcas disponibles.</p>';
-                        }
-                        ?>
-
-                    </div>
-
-                    <p><strong>Excluir categorías:</strong></p>
-
-                    <div id="marpico_categoria_excluir_brand">
-
                     <?php
-                    $product_categories = get_terms([
-                        'taxonomy'   => 'product_cat',
-                        'hide_empty' => false,
-                        'parent'     => 0,
-                    ]);
-
-                    if (!empty($product_categories) && !is_wp_error($product_categories)) {
-
-                        foreach ($product_categories as $parent_cat) {
-
-                            echo '<div class="marpico-cat-parent">';
-
-                            echo '<label style="display:block; margin-bottom:4px;">
-                                    <input type="checkbox" name="excluded_categories_brand[]" value="' . esc_attr($parent_cat->term_id) . '">
-                                    <strong>' . esc_html($parent_cat->name) . '</strong>
-                                </label>';
-
-                            $child_cats = get_terms([
-                                'taxonomy'   => 'product_cat',
-                                'hide_empty' => false,
-                                'parent'     => $parent_cat->term_id,
-                            ]);
-
-                            if (!empty($child_cats) && !is_wp_error($child_cats)) {
-
-                                echo '<div style="margin-left:20px;">';
-
-                                foreach ($child_cats as $child_cat) {
-
-                                    echo '<label style="display:block;">
-                                            <input type="checkbox" name="excluded_categories_brand[]" value="' . esc_attr($child_cat->term_id) . '">
-                                            ' . esc_html($child_cat->name) . '
-                                        </label>';
-                                }
-
-                                echo '</div>';
-                            }
-
-                            echo '</div>';
-                        }
-
-                    } else {
-
-                        echo '<p>No hay categorías disponibles.</p>';
-
-                    }
+                        $sch_cfg   = Marpico_Scheduler::get();
+                        $sch_labels = [ 'marpico' => 'Marpico', 'cdo' => 'CDO' ];
+                        $sch_freqs = [
+                            'hourly'   => 'Cada hora',
+                            'every6h'  => 'Cada 6 horas',
+                            'every12h' => 'Cada 12 horas',
+                            'daily'    => 'Diaria',
+                            'weekly'   => 'Semanal',
+                        ];
+                        $sch_days = [ 'Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado' ];
+                        foreach ( Marpico_Scheduler::providers() as $sp ) :
+                            $s     = $sch_cfg[ $sp ];
+                            $next  = Marpico_Scheduler::next_run( $sp );
+                            $nextT = $next ? get_date_from_gmt( gmdate( 'Y-m-d H:i:s', $next ), 'Y-m-d H:i' ) : '—';
                     ?>
+                    <div class="sch-row" data-provider="<?php echo esc_attr( $sp ); ?>"
+                        style="border:1px solid #ddd;border-radius:8px;padding:14px;margin-bottom:14px;">
+                        <h3 style="margin:0 0 10px;"><?php echo esc_html( $sch_labels[ $sp ] ?? ucfirst( $sp ) ); ?></h3>
 
+                        <label style="display:inline-block;margin-bottom:8px;">
+                            <input type="checkbox" class="sch-enabled" <?php checked( ! empty( $s['enabled'] ) ); ?>>
+                            Activar sincronización automática
+                        </label>
+
+                        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+                            <label>Frecuencia:
+                                <select class="sch-freq marpico-input" style="width:auto;">
+                                    <?php foreach ( $sch_freqs as $fk => $fl ) : ?>
+                                        <option value="<?php echo esc_attr( $fk ); ?>" <?php selected( $s['frequency'], $fk ); ?>><?php echo esc_html( $fl ); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </label>
+
+                            <label class="sch-weekday-wrap">Día:
+                                <select class="sch-weekday marpico-input" style="width:auto;">
+                                    <?php foreach ( $sch_days as $dk => $dl ) : ?>
+                                        <option value="<?php echo esc_attr( $dk ); ?>" <?php selected( (int) $s['weekday'], $dk ); ?>><?php echo esc_html( $dl ); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </label>
+
+                            <label class="sch-hour-wrap">a las
+                                <input type="number" class="sch-hour marpico-input" min="0" max="23" value="<?php echo esc_attr( $s['hour'] ); ?>" style="width:70px;">:00
+                            </label>
+                        </div>
+
+                        <p style="margin:10px 0 0;font-size:12px;color:#666;">
+                            Última: <?php echo esc_html( $s['last_run'] ? $s['last_run'] . ' (' . $s['last_status'] . ')' : '—' ); ?>
+                            &nbsp;·&nbsp; Próxima: <span class="sch-next"><?php echo esc_html( $nextT ); ?></span>
+                        </p>
+
+                        <button class="sch-run marpico-btn" style="margin-top:10px;background:#0073aa;color:#fff;">Ejecutar ahora</button>
                     </div>
+                    <?php endforeach; ?>
 
-                    <button 
-                        id="marpico_aplicar_aumento_marca" 
-                        class="button button-primary">
-                        Aplicar aumento por marca
-                    </button>
+                    <div style="margin-top:8px;">
+                        <button id="schedule-save" class="marpico-btn marpico-btn-primary">Guardar programación</button>
+                    </div>
+                    <div id="schedule-msg" style="margin-top:10px;"></div>
                 </div>
             </div>
         </div>
@@ -642,41 +727,27 @@
                         Registro de Actividad
                     </h2>
                 </div>
-                <div class="marpico-logs" id="marpico-logs-container">
-                    <?php
-                    $logs = get_option('marpico_sync_log', []);
-                    if (empty($logs)) {
-                        echo '<div class="marpico-log-entry marpico-log-info">';
-                        echo '<span class="marpico-log-timestamp">[' . current_time('Y-m-d H:i:s') . ']</span>';
-                        echo '<span class="marpico-log-message">No hay registros disponibles</span>';
-                        echo '</div>';
-                    } else {
-                        foreach (array_slice($logs, 0, 20) as $log) {
-                            $log_class = 'marpico-log-info';
-                            if (strpos($log, '✓') !== false || strpos($log, 'exitosamente') !== false) {
-                                $log_class = 'marpico-log-success';
-                            } elseif (strpos($log, 'Error') !== false || strpos($log, 'error') !== false) {
-                                $log_class = 'marpico-log-error';
-                            }
-                            
-                            // Extraer timestamp si existe
-                            preg_match('/\[(.*?)\](.*)/', $log, $matches);
-                            if (count($matches) >= 3) {
-                                echo '<div class="marpico-log-entry ' . $log_class . '">';
-                                echo '<span class="marpico-log-timestamp">[' . esc_html($matches[1]) . ']</span>';
-                                echo '<span class="marpico-log-message">' . esc_html(trim($matches[2])) . '</span>';
-                                echo '</div>';
-                            } else {
-                                echo '<div class="marpico-log-entry ' . $log_class . '">';
-                                echo '<span class="marpico-log-message">' . esc_html($log) . '</span>';
-                                echo '</div>';
-                            }
-                        }
-                    }
-                    ?>
+
+                <!-- Barra de herramientas -->
+                <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px;">
+                    <div id="log-filters" style="display:flex;flex-wrap:wrap;gap:6px;">
+                        <button class="marpico-btn log-filter active" data-level="all">Todos <span class="log-count" data-c="total">0</span></button>
+                        <button class="marpico-btn log-filter" data-level="error">Errores <span class="log-count" data-c="error">0</span></button>
+                        <button class="marpico-btn log-filter" data-level="warning">Avisos <span class="log-count" data-c="warning">0</span></button>
+                        <button class="marpico-btn log-filter" data-level="success">OK <span class="log-count" data-c="success">0</span></button>
+                        <button class="marpico-btn log-filter" data-level="info">Info <span class="log-count" data-c="info">0</span></button>
+                    </div>
+                    <input type="search" id="log-search" class="marpico-input" placeholder="Buscar…" style="width:auto;flex:1;min-width:160px;">
+                    <label style="font-size:13px;white-space:nowrap;"><input type="checkbox" id="log-autorefresh" checked> Auto-actualizar</label>
+                    <button id="log-refresh" class="marpico-btn">↻ Actualizar</button>
+                    <button id="log-export" class="marpico-btn">⬇ Exportar</button>
+                    <button id="log-clear" class="marpico-btn" style="background:#ef4444;color:#fff;">Limpiar</button>
                 </div>
+
+                <div class="marpico-logs" id="marpico-logs-container" style="max-height:520px;overflow:auto;"></div>
+            </div>
         </div>
-        
+
     </div>
 </div>
 
@@ -730,6 +801,12 @@ jQuery(document).ready(function($) {
       showSyncPanel($('#sync-service-selector').val());
       $('#section-batch-sync').show();
     }
+  });
+
+  // Botones del Resumen General → navegan al panel correspondiente (vía el nav lateral).
+  $(document).on('click', '.ov-goto', function(e) {
+    e.preventDefault();
+    $('.marpico-sidebar .marpico-nav-item[data-section="' + $(this).data('goto') + '"]').trigger('click');
   });
 
   // --- Toggle provider fields (al cambiar en el select) ---
