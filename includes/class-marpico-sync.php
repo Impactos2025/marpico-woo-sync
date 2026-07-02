@@ -112,10 +112,10 @@ class Marpico_Sync {
                 }
 
                 update_post_meta( $product_id, "_marpico_{$key}", $value );
-                $this->log( "GUARDADO: _marpico_{$key} => {$value}" );
-            } else {
-
-                $this->log( "CLAVE AUSENTE: {$key} (no se sobrescribe)" );
+                // Detalle por-campo: solo en depuración (evita inundar el registro).
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                    error_log( "Marpico Sync GUARDADO: _marpico_{$key} => {$value}" );
+                }
             }
         }
 
@@ -146,54 +146,11 @@ class Marpico_Sync {
             }
         }
 
-        // Asignar categoría (padre e hijo)
+        // Asignar categoría (padre e hijo) vía la capa de mapeo canónica.
+        // Aplica alias (p.ej. "Oficina y Negocios" -> "Oficina") para que Marpico
+        // y CDO compartan los mismos términos del menú.
         if ( $category ) {
-            $term_id = 0;
-
-            // Padre
-            $parent_slug = sanitize_title( $category );
-            $parent_term = get_term_by( 'slug', $parent_slug, 'product_cat' );
-            if ( ! $parent_term ) {
-                $newt = wp_insert_term( $category, 'product_cat', [ 'slug' => $parent_slug ] );
-                if ( ! is_wp_error( $newt ) && isset( $newt['term_id'] ) ) {
-                    $parent_id = intval( $newt['term_id'] );
-                }
-            } else {
-                $parent_id = intval( $parent_term->term_id );
-            }
-
-            // Hija
-            $child_name = $first['subcategoria_1']['nombre'] ?? '';
-            if ( $child_name ) {
-                $child_slug = sanitize_title( $child_name );
-                $child_term = get_term_by( 'slug', $child_slug, 'product_cat' );
-                if ( ! $child_term ) {
-                    $child_insert = wp_insert_term( $child_name, 'product_cat', [ 'slug' => $child_slug, 'parent' => ( $parent_id ?? 0 ) ] );
-                    if ( ! is_wp_error( $child_insert ) && isset( $child_insert['term_id'] ) ) {
-                        $term_id = intval( $child_insert['term_id'] );
-                    }
-                } else {
-                    $term_id = intval( $child_term->term_id );
-                    // Asegurar que la relación padre -> hijo sea correcta
-                    if ( isset( $parent_id ) && $child_term->parent != $parent_id ) {
-                        wp_update_term( $term_id, 'product_cat', [ 'parent' => $parent_id ] );
-                    }
-                }
-            } else {
-                // Si no hay hija, asignar solo padre
-                if ( isset( $parent_id ) ) $term_id = $parent_id;
-            }
-
-            if ( ! empty( $term_id ) ) {
-                $assign_ids = [$term_id];
-
-                // Si hay padre y no es el mismo que la hija, también lo agregamos
-                if ( ! empty( $parent_id ) && $parent_id !== $term_id ) {
-                    $assign_ids[] = $parent_id;
-                }
-
-                wp_set_object_terms( $product_id, $assign_ids, 'product_cat' );
-            }
+            Category_Mapper::assign_marpico_categories( $product_id, $first );
         }
 
         // Asignar etiquetas (product_tag) desde "temas"
@@ -262,6 +219,9 @@ class Marpico_Sync {
         $this->assign_fixed_brand_to_product($product_id);
 
         $this->sync_product_variations_optimized( $product_id, $first, $title );
+
+        // Aplicar el ajuste de precios guardado (desde la base recién sembrada).
+        Marpico_Price_Engine::apply_to_product( $product_id );
 
         wc_delete_product_transients( $product_id );
 
@@ -441,6 +401,11 @@ class Marpico_Sync {
 
             } else {
                 error_log("Marpico Sync: Variación {$color_name} sin cambios, se mantiene igual");
+            }
+
+            // Sembrar el precio base del API (para el motor de ajuste de precios).
+            if ( $variation_id ) {
+                Marpico_Price_Engine::seed_base( $variation_id, $variation_data['price'] );
             }
         }
         // Guardar la galería una sola vez, sin duplicados
@@ -719,9 +684,8 @@ class Marpico_Sync {
     }
     
     private function log( $message ) {
-        $log = get_option( 'marpico_sync_log', [] );
-        $log[] = '[' . current_time('mysql') . '] ' . $message;
-        if ( count( $log ) > 200 ) $log = array_slice( $log, -200 );
-        update_option( 'marpico_sync_log', $log );
+        // Detalle por-producto: canal de depuración. El registro de actividad
+        // (Marpico_Logger) lo alimenta el motor de jobs con eventos de alto nivel.
+        error_log( 'Marpico Sync: ' . $message );
     }
 }

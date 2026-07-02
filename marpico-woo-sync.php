@@ -2,10 +2,10 @@
 /**
  * Plugin Name: Marpico Woo Sync
  * Description: Sincroniza productos, categorías y etiquetas desde API´s externas hacia WooCommerce.
- * Version: 1.2.2
+ * Version: 1.3.0
  * Author: David Perez
- * Author URI:  https://github.com/davidpezcas
- * Plugin URI:  https://github.com/davidpezcas/marpico-woo-sync
+ * Author URI:  https://github.com/Impactos2025
+ * Plugin URI:  https://github.com/Impactos2025/marpico-woo-sync
  * Text Domain: marpico-woo-sync
  */
 
@@ -13,13 +13,15 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 // Definir constante de versión
 if ( ! defined( 'MARPICO_SYNC_VERSION' ) ) {
-    define( 'MARPICO_SYNC_VERSION', '1.2.2' );
+    define( 'MARPICO_SYNC_VERSION', '1.3.0' );
 }
 
 define( 'MARPICO_WOO_SYNC_PATH', plugin_dir_path( __FILE__ ) );
 define( 'MARPICO_WOO_SYNC_URL',  plugin_dir_url( __FILE__ ) );
 
 // includes
+require_once MARPICO_WOO_SYNC_PATH . 'includes/class-logger.php';
+require_once MARPICO_WOO_SYNC_PATH . 'includes/class-category-mapper.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-marpico-client.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-marpico-sync.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-beststock-client.php';
@@ -30,20 +32,24 @@ require_once MARPICO_WOO_SYNC_PATH . 'includes/class-price.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-price-percentage.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-cdo-client.php';
 require_once MARPICO_WOO_SYNC_PATH . 'includes/class-cdo-sync.php';
+require_once MARPICO_WOO_SYNC_PATH . 'includes/class-price-engine.php';
+require_once MARPICO_WOO_SYNC_PATH . 'includes/class-sync-job.php';
+require_once MARPICO_WOO_SYNC_PATH . 'includes/class-scheduler.php';
 
 if ( is_admin() ) {
     require_once MARPICO_WOO_SYNC_PATH . 'includes/github-updater.php';
 
     // Conectar el plugin a GitHub
-    $repo_url = 'https://github.com/davidpezcas/marpico-woo-sync';
+    $repo_url = 'https://github.com/Impactos2025/marpico-woo-sync';
     new GitHub_Updater(__FILE__, $repo_url);
 }
 
 // init admin
 add_action( 'plugins_loaded', function() {
     new Marpico_Admin();
-    new Marpico_Price();
-    new Marpico_Price_Brand_Percentage();
+    // Ajuste de precios unificado (reemplaza Marpico_Price y Marpico_Price_Brand_Percentage).
+    Marpico_Sync_Job::init();
+    Marpico_Scheduler::init();
 });
 
 add_action('admin_enqueue_scripts', function() {

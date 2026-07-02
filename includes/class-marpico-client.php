@@ -102,6 +102,15 @@ class Marpico_Client {
             return new WP_Error( 'missing_endpoint', 'No se configuró el endpoint' );
         }
 
+        // Cache de catálogo: la sincronización por lotes llama a este método en cada
+        // lote. Sin cache se re-descarga el catálogo completo decenas de veces y la
+        // API responde 503 (rate-limit). Se cachea el listado durante la corrida.
+        $cache_key = 'marpico_catalog_cache';
+        $cached    = get_transient( $cache_key );
+        if ( is_array( $cached ) ) {
+            return $cached;
+        }
+
         $url = $this->endpoint . '/materialesAPI';
 
         $args = [
@@ -128,6 +137,10 @@ class Marpico_Client {
 
         // si la API devuelve algo como ['results' => [...]]
         $results = isset( $json['results'] ) ? $json['results'] : $json;
+
+        // TTL filtrable; suficiente para una corrida completa por lotes.
+        $ttl = (int) apply_filters( 'marpico_catalog_cache_ttl', 15 * MINUTE_IN_SECONDS );
+        set_transient( $cache_key, $results, $ttl );
 
         return $results; // Devolver todos sin límite
     }

@@ -181,7 +181,12 @@ class BestStock_Sync {
 
         // Guardar ID externo
         update_post_meta($product_id, '_beststock_id', $prod['id']);
-        
+
+        // Precio base del API (motor de ajuste de precios; solo simples con precio).
+        if ( empty($prod['colors']) && !empty($prod['price_scale'][0]['price']) ) {
+            Marpico_Price_Engine::seed_base($product_id, $prod['price_scale'][0]['price']);
+        }
+
         $terms = [];
 
         if (!empty($_POST['wc_category_parent'])) {
@@ -293,6 +298,9 @@ class BestStock_Sync {
         } else {
             delete_post_meta($product_id, '_product_image_gallery');
         }
+
+        // Aplicar el ajuste de precios guardado (desde la base recién sembrada).
+        Marpico_Price_Engine::apply_to_product($product_id);
 
         return true;
     }

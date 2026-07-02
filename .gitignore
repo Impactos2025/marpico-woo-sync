@@ -1,0 +1,14 @@
+# Sistema
+.DS_Store
+Thumbs.db
+# Editores
+.vscode/
+.idea/
+*.swp
+# Dependencias / build
+node_modules/
+vendor/
+# Temporales / logs
+*.log
+*.bak
+*.zip

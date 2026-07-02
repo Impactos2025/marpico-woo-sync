@@ -163,8 +163,11 @@ class CDO_Sync {
             // recalcular stock del producto variable
             wc_delete_product_transients($product_id);
             WC_Product_Variable::sync($product_id);
-            
+
         }
+
+        // Aplicar el ajuste de precios guardado (desde la base recién sembrada).
+        Marpico_Price_Engine::apply_to_product($product_id);
     }
 
     private function find_product_by_code($code) {
@@ -349,6 +352,9 @@ class CDO_Sync {
                 update_post_meta( $variation_id, '_regular_price', $variation_data['price'] );
                 update_post_meta( $variation_id, '_price', $variation_data['price'] );
 
+                // Precio base del API para el motor de ajuste de precios.
+                Marpico_Price_Engine::seed_base( $variation_id, $variation_data['price'] );
+
                 update_post_meta( $variation_id, '_stock', $variation_data['stock'] );
                 update_post_meta( $variation_id, '_manage_stock', 'yes' );
 
@@ -427,55 +433,13 @@ class CDO_Sync {
 
     private function sync_product_categories($product_id, $product) {
 
+        // El mapeo a la taxonomía canónica (y la separación de colecciones a
+        // product_tag) se delega en Category_Mapper para que los productos CDO
+        // caigan en las mismas categorías del menú que los de Marpico.
         $categories = $product['categories'] ?? [];
         if (empty($categories)) return;
 
-        static $category_cache = [];
-        $term_ids = [];
-
-        foreach ($categories as $cat) {
-
-            // Obtener nombre de la categoría
-            if (is_array($cat) && isset($cat['name'])) {
-                $category_name = trim($cat['name']);
-            } elseif (is_string($cat)) {
-                $category_name = trim($cat);
-            } else {
-                continue; // si no tiene nombre válido, saltar
-            }
-
-            if (!$category_name) continue;
-
-            $category_slug = sanitize_title($category_name);
-
-            // Revisar caché
-            if (isset($category_cache[$category_slug])) {
-                $term_ids[] = $category_cache[$category_slug];
-                continue;
-            }
-
-            // Revisar si existe en WP
-            $term = get_term_by('slug', $category_slug, 'product_cat');
-            if (!$term) {
-                $new_term = wp_insert_term($category_name, 'product_cat', ['slug' => $category_slug]);
-                if (!is_wp_error($new_term)) {
-                    $term_id = $new_term['term_id'];
-                } else {
-                    continue; // si falla la creación, saltar
-                }
-            } else {
-                $term_id = $term->term_id;
-            }
-
-            // Guardar en caché y en lista final
-            $category_cache[$category_slug] = $term_id;
-            $term_ids[] = $term_id;
-        }
-
-        // Asignar todas las categorías al producto
-        if (!empty($term_ids)) {
-            wp_set_object_terms($product_id, $term_ids, 'product_cat');
-        }
+        Category_Mapper::assign_cdo_categories($product_id, $categories);
     }
 
     /* private function sync_product_categories($product_id, $product) {
@@ -667,9 +631,8 @@ class CDO_Sync {
     }
 
     private function log( $message ) {
-        $log = get_option( 'cdo_sync_log', [] );
-        $log[] = '[' . current_time('mysql') . '] ' . $message;
-        if ( count( $log ) > 200 ) $log = array_slice( $log, -200 );
-        update_option( 'cdo_sync_log', $log );
+        // Detalle por-producto → canal de depuración (el registro de actividad
+        // lo alimenta el motor de jobs con eventos de alto nivel).
+        error_log( 'CDO Sync: ' . $message );
     }
 }

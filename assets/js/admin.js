@@ -175,240 +175,425 @@ jQuery(($) => {
     );
   }
 
-  $("#sync-products-batch").on("click", function (e) {
-    e.preventDefault();
-    var btn = $(this);
+  // ===================== Sincronización en segundo plano =====================
+  // El servidor (Action Scheduler) encadena los lotes; el navegador solo lanza
+  // el trabajo y consulta el progreso. Sobrevive a cambios/cierre de pestaña.
+  const SYNC = (function () {
+    let pollTimer = null;
+    const POLL_MS = 4000;
 
-    if (syncInProgress) {
-      if (syncPaused) {
-        syncPaused = false;
-        btn.text("Pausar Sincronización");
-        addLogEntry("Sincronización reanudada", "info");
-        resumeSync();
+    function statusEl(provider) {
+      if (provider === "cdo") return $("#cdo-sync-status-batch");
+      if (provider === "beststock") return $("#api-sync-status");
+      if (provider === "price") return $("#marpico-price-status");
+      return $("#marpico-sync-status-batch");
+    }
+    function providerLabel(p) {
+      if (p === "cdo") return "CDO";
+      if (p === "beststock") return "BestStock";
+      if (p === "price") return "Ajuste de precios";
+      return "Marpico";
+    }
+    // Bloquea el selector de servicio mientras un job está activo (no se puede
+    // sincronizar otro proveedor a la vez). Activo = queued|running|paused; los
+    // estados terminales (completed|failed|canceled) lo liberan.
+    function applySelectorLock(job) {
+      const sel = $("#sync-service-selector");
+      if (!sel.length) return;
+      const active =
+        job && ["queued", "running", "paused"].indexOf(job.status) >= 0;
+      if (active) {
+        // Solo fijar el selector si el job es de un proveedor real (no un job de precios).
+        if (
+          job.provider &&
+          job.provider !== "price" &&
+          sel.val() !== job.provider
+        ) {
+          sel.val(job.provider).trigger("change");
+        }
+        sel.prop("disabled", true).attr(
+          "title",
+          "Hay un proceso en curso (" +
+            providerLabel(job.provider) +
+            "). Cancélalo para cambiar de servicio.",
+        );
       } else {
-        syncPaused = true;
-        btn.text("Reanudar Sincronización");
-        addLogEntry("Sincronización pausada", "warning");
-      }
-      return;
-    }
-
-    syncStartTime = Date.now();
-    syncInProgress = true;
-    syncPaused = false;
-    currentOffset = 0;
-    retryCount = 0;
-
-    btn.text("Pausar Sincronización").addClass("marpico-btn-secondary");
-    addLogEntry("Iniciando sincronización por lotes de 10 productos", "info");
-
-    $("#marpico-sync-status-batch").html(`
-      <div class="marpico-progress-container">
-        <div class="marpico-progress-bar">
-          <div class="marpico-progress-fill" style="width: 0%"></div>
-        </div>
-        <div class="marpico-progress-text">Iniciando sincronización...</div>
-        <div class="sync-controls">
-          <button id="cancel-sync" class="marpico-btn" style="background: #ef4444; color: white;">Cancelar Sincronización</button>
-        </div>
-      </div>
-    `);
-
-    $("#cancel-sync").on("click", () => {
-      cancelSync();
-    });
-
-    var totalProcessed = 0;
-    var totalProducts = 0;
-    var batchSize = 10;
-
-    function cancelSync() {
-      syncInProgress = false;
-      syncPaused = false;
-      const elapsedTime = formatElapsedTime(syncStartTime);
-      const message = `Sincronización cancelada. Procesados ${totalProcessed} productos en ${elapsedTime}`;
-
-      $("#marpico-sync-status-batch").html(
-        `<span style="color: orange;">⚠ ${message}</span>`,
-      );
-      addLogEntry(message, "info");
-      btn
-        .prop("disabled", false)
-        .text("Sincronizar Productos por Lotes")
-        .removeClass("marpico-btn-secondary");
-    }
-
-    function resumeSync() {
-      if (!syncPaused && syncInProgress) {
-        syncBatch(currentOffset);
+        sel.prop("disabled", false).removeAttr("title");
       }
     }
-
-    function syncBatch(offset) {
-      if (syncPaused || !syncInProgress) {
-        return;
-      }
-
-      currentOffset = offset;
-      batchStartTime = Date.now();
-
-      console.log(
-        `[v0] [${getCurrentTimestamp()}] Iniciando lote en offset: ${offset}`,
-      );
-      var currentPercentage =
-        totalProducts > 0
-          ? Math.round((totalProcessed / totalProducts) * 100)
-          : 0;
-      $(".marpico-progress-text").text(
-        `${currentPercentage}% - Procesando lote desde posición ${offset}...`,
-      );
-
+    function escapeHtml(s) {
+      return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      });
+    }
+    function ajax(action, extra, cb) {
       $.post(
         marpico_ajax.ajax_url,
-        {
-          action: "marpico_sync_products_batch",
-          security: marpico_ajax.nonce,
-          offset: offset,
-          batch_size: batchSize,
-        },
-        (resp) => {
-          const batchElapsed = formatElapsedTime(batchStartTime);
-          console.log(
-            `[v0] [${getCurrentTimestamp()}] Respuesta recibida en ${batchElapsed}:`,
-            resp,
-          );
+        Object.assign({ action: action, security: marpico_ajax.nonce }, extra || {}),
+        cb,
+      );
+    }
 
-          if (resp.success) {
-            retryCount = 0;
-            var data = resp.data;
-            totalProcessed += data.processed;
-            totalProducts = data.total;
+    function render(job) {
+      applySelectorLock(job);
+      if (!job || job.status === "idle") return;
+      const el = statusEl(job.provider);
+      if (!el.length) return;
 
-            var percentage = Math.round((totalProcessed / totalProducts) * 100);
+      const pct = job.percent || 0;
+      const running = job.status === "running" || job.status === "queued";
+      let controls = "";
+      if (running) {
+        controls =
+          '<button class="marpico-btn sync-pause" style="margin-right:8px;">Pausar</button>' +
+          '<button class="marpico-btn sync-cancel" style="background:#ef4444;color:#fff;">Cancelar</button>';
+      } else if (job.status === "paused" || job.status === "failed") {
+        controls =
+          '<button class="marpico-btn sync-resume" style="margin-right:8px;background:#0073aa;color:#fff;">Reanudar</button>' +
+          '<button class="marpico-btn sync-cancel" style="background:#ef4444;color:#fff;">Cancelar</button>';
+      }
 
-            $(".marpico-progress-fill")
-              .css("width", percentage + "%")
-              .get(0).offsetHeight;
-            $(".marpico-progress-text")
-              .text(
-                `${percentage}% - Procesados ${totalProcessed} de ${totalProducts} productos`,
-              )
-              .get(0).offsetHeight;
+      el.html(
+        '<div class="marpico-progress-container">' +
+          '<div class="marpico-progress-bar"><div class="marpico-progress-fill" style="width:' +
+          pct +
+          '%"></div></div>' +
+          '<div class="marpico-progress-text">' +
+          pct +
+          "% — " +
+          escapeHtml(job.message || "") +
+          " (" +
+          (job.processed || 0) +
+          "/" +
+          (job.total || 0) +
+          ")</div>" +
+          '<div class="sync-controls" style="margin-top:12px;">' +
+          controls +
+          "</div>" +
+        "</div>",
+      );
+    }
 
-            const logMessage = `Lote completado: ${data.processed} productos en ${batchElapsed} (${percentage}% total)`;
-            addLogEntry(logMessage, "success");
-            console.log(`[v0] [${getCurrentTimestamp()}] ${logMessage}`);
-
-            updateStats();
-
-            if (data.has_more && syncInProgress && !syncPaused) {
-              setTimeout(() => {
-                syncBatch(data.next_offset);
-              }, 800);
-            } else if (!data.has_more) {
-              syncInProgress = false;
-              const totalElapsed = formatElapsedTime(syncStartTime);
-              const completionMessage = `✓ Sincronización completada: ${totalProcessed} productos procesados en ${totalElapsed}`;
-
-              console.log(
-                `[v0] [${getCurrentTimestamp()}] ${completionMessage}`,
-              );
-              addLogEntry(completionMessage, "success");
-
-              $("#marpico-sync-status-batch").html(
-                `<div class="marpico-log-success" style="padding: 16px; text-align: center; font-weight: 600;">${completionMessage}</div>`,
-              );
-              btn
-                .prop("disabled", false)
-                .text("Sincronizar Productos por Lotes")
-                .removeClass("marpico-btn-secondary");
-              updateStats();
-            }
-          } else {
-            const errorMessage = `Error en lote (offset ${offset}): ${
-              resp.data || "Error desconocido"
-            }`;
-            console.log(`[v0] [${getCurrentTimestamp()}] ${errorMessage}`);
-            addLogEntry(errorMessage, "error");
-            handleSyncError(resp.data || "Error desconocido", offset);
-          }
-        },
-      ).fail((xhr) => {
-        const batchElapsed = formatElapsedTime(batchStartTime);
-        let errorMsg = "Error de conexión";
-        if (xhr.status === 0) {
-          errorMsg = "Sin conexión a internet o servidor no disponible";
-        } else if (xhr.status === 500) {
-          errorMsg = "Error interno del servidor";
-        } else if (xhr.status === 504) {
-          errorMsg = "Timeout del servidor";
+    function tick() {
+      ajax("marpico_sync_status", {}, function (resp) {
+        if (!resp || !resp.success) return;
+        const job = resp.data;
+        if (!job || job.status === "idle") {
+          stopPoll();
+          return;
         }
+        render(job);
+        if (["running", "queued"].indexOf(job.status) < 0) {
+          stopPoll();
+          if (job.status === "completed") {
+            addLogEntry("✓ " + (job.message || "Sincronización completada"), "success");
+          } else if (job.status === "failed") {
+            addLogEntry("❌ " + (job.last_error || job.message || "Error"), "error");
+          } else if (job.status === "canceled") {
+            addLogEntry("⚠ Sincronización cancelada", "warning");
+          }
+          updateStats();
+        }
+      });
+    }
+    function startPoll() {
+      stopPoll();
+      pollTimer = setInterval(tick, POLL_MS);
+    }
+    function stopPoll() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
 
-        const fullErrorMsg = `${errorMsg} después de ${batchElapsed} (offset ${offset})`;
-        console.log(
-          `[v0] [${getCurrentTimestamp()}] Error AJAX: ${xhr.status} ${
-            xhr.statusText
-          } - ${fullErrorMsg}`,
-        );
-        addLogEntry(fullErrorMsg, "error");
-        handleSyncError(errorMsg, offset);
+    function start(provider, extra) {
+      ajax("marpico_sync_start", Object.assign({ provider: provider }, extra || {}), function (resp) {
+        if (!resp || !resp.success) {
+          const msg = resp && resp.data ? resp.data : "No se pudo iniciar la sincronización";
+          statusEl(provider).html('<span style="color:#ef4444;">❌ ' + escapeHtml(msg) + "</span>");
+          addLogEntry(msg, "error");
+          return;
+        }
+        addLogEntry("Sincronización " + providerLabel(provider) + " iniciada en segundo plano", "info");
+        render(resp.data);
+        startPoll();
       });
     }
 
-    function handleSyncError(errorMsg, offset) {
-      retryCount++;
-
-      if (retryCount <= maxRetries) {
-        const retryMessage = `Reintentando lote ${retryCount}/${maxRetries} en 5 segundos (offset ${offset})`;
-        addLogEntry(retryMessage, "info");
-
-        $(".marpico-progress-text").html(`
-          Error: ${errorMsg}<br>
-          <div class="retry-info">${retryMessage}</div>
-        `);
-
-        setTimeout(() => {
-          if (syncInProgress && !syncPaused) {
-            syncBatch(offset);
-          }
-        }, 5000);
-      } else {
-        syncInProgress = false;
-        const elapsedTime = formatElapsedTime(syncStartTime);
-        const finalErrorMsg = `Error después de ${maxRetries} intentos: ${errorMsg}. Procesados ${totalProcessed} productos en ${elapsedTime}`;
-
-        console.log(`[v0] [${getCurrentTimestamp()}] ${finalErrorMsg}`);
-        addLogEntry(finalErrorMsg, "error");
-
-        $("#marpico-sync-status-batch").html(`
-          <span style="color: red;">❌ ${finalErrorMsg}</span><br>
-          <button id="resume-from-error" class="marpico-btn" style="margin-top: 10px; background: #0073aa; color: white;">Continuar desde donde se quedó</button>
-        `);
-
-        $("#resume-from-error").on("click", function () {
-          retryCount = 0;
-          syncInProgress = true;
-          syncPaused = false;
-          syncStartTime = Date.now(); // Reiniciar tiempo
-          btn.text("Pausar Sincronización").addClass("marpico-btn-secondary");
-          addLogEntry("Reanudando sincronización desde error", "info");
-          $(this)
-            .parent()
-            .html(
-              '<div class="marpico-progress-text">Reanudando sincronización...</div>',
-            );
-          setTimeout(() => {
-            syncBatch(currentOffset);
-          }, 1000);
-        });
-
-        btn
-          .prop("disabled", false)
-          .text("Sincronizar Productos por Lotes")
-          .removeClass("marpico-btn-secondary");
-      }
+    // Lanza "Aplicar ahora" (job de precios en segundo plano). `extra` lleva la config del formulario.
+    function startPrice(extra) {
+      ajax("marpico_price_apply_start", extra || {}, function (resp) {
+        if (!resp || !resp.success) {
+          const msg = resp && resp.data ? resp.data : "No se pudo iniciar el ajuste de precios";
+          statusEl("price").html('<span style="color:#ef4444;">❌ ' + escapeHtml(msg) + "</span>");
+          addLogEntry(msg, "error");
+          return;
+        }
+        addLogEntry("Ajuste de precios iniciado en segundo plano", "info");
+        render(resp.data);
+        startPoll();
+      });
     }
-    syncBatch(0);
+
+    // Controles delegados (sobreviven a los re-render del panel).
+    $(document).on("click", ".sync-pause", function (e) {
+      e.preventDefault();
+      ajax("marpico_sync_pause", {}, function (r) { if (r && r.success) render(r.data); });
+    });
+    $(document).on("click", ".sync-resume", function (e) {
+      e.preventDefault();
+      ajax("marpico_sync_resume", {}, function (r) { if (r && r.success) { render(r.data); startPoll(); } });
+    });
+    $(document).on("click", ".sync-cancel", function (e) {
+      e.preventDefault();
+      if (!confirm("¿Cancelar la sincronización en curso?")) return;
+      ajax("marpico_sync_cancel", {}, function (r) { if (r && r.success) { render(r.data); stopPoll(); } });
+    });
+
+    // Al cargar la página: si hay un trabajo vivo, mostrarlo y reanudar el polling.
+    function init() {
+      ajax("marpico_sync_status", {}, function (resp) {
+        if (!resp || !resp.success) return;
+        const job = resp.data;
+        if (!job || job.status === "idle") return;
+        const sel = $("#sync-service-selector");
+        if (sel.length && job.provider) sel.val(job.provider).trigger("change");
+        render(job);
+        if (["running", "queued", "paused"].indexOf(job.status) >= 0) startPoll();
+      });
+    }
+
+    return { start: start, startPrice: startPrice, init: init };
+  })();
+
+  // ===================== Ajuste de precios: guardar / aplicar =====================
+  function priceFormData() {
+    return {
+      monto: $("#price-monto").val() || 0,
+      porcentaje: $("#price-porcentaje").val() || 0,
+      excluir_cats: $('input[name="excluir_cats[]"]:checked').map(function () { return this.value; }).get(),
+      marcas_porcentaje: $('input[name="marcas_porcentaje[]"]:checked').map(function () { return this.value; }).get(),
+      excluir_marcas: $('input[name="excluir_marcas[]"]:checked').map(function () { return this.value; }).get(),
+    };
+  }
+
+  $("#price-save").on("click", function (e) {
+    e.preventDefault();
+    const btn = $(this).prop("disabled", true).text("Guardando…");
+    $.post(
+      marpico_ajax.ajax_url,
+      Object.assign({ action: "marpico_price_save", security: marpico_ajax.nonce }, priceFormData()),
+      function (resp) {
+        $("#price-save-msg").html(
+          resp && resp.success
+            ? '<span style="color:#16a34a;">✓ Configuración guardada.</span>'
+            : '<span style="color:#ef4444;">❌ ' + (resp && resp.data ? resp.data : "Error") + "</span>",
+        );
+      },
+    ).always(function () {
+      btn.prop("disabled", false).text("Guardar configuración");
+    });
+  });
+
+  $("#price-apply").on("click", function (e) {
+    e.preventDefault();
+    if (!confirm("¿Aplicar el ajuste de precios a todo el catálogo? Se guardará la configuración actual y correrá en segundo plano.")) return;
+    // Guarda la config del formulario y lanza el job de precios.
+    SYNC.startPrice(priceFormData());
+  });
+
+  // Marca excluida (③) → deshabilita su casilla en "recibe %" (②).
+  $(document).on("change", ".price-excl-brand", function () {
+    const id = $(this).data("brand");
+    const pct = $('#price-marcas-pct input[value="' + id + '"]');
+    const wrap = $(".pc-brand-pct-" + id);
+    if (this.checked) {
+      pct.prop("checked", false).prop("disabled", true);
+      wrap.css("opacity", 0.5);
+    } else {
+      pct.prop("disabled", false);
+      wrap.css("opacity", 1);
+    }
+  });
+
+  // ===================== Programación =====================
+  function schFreqVisibility($row) {
+    const f = $row.find(".sch-freq").val();
+    $row.find(".sch-weekday-wrap").toggle(f === "weekly");
+    $row.find(".sch-hour-wrap").toggle(f === "daily" || f === "weekly");
+  }
+  $(".sch-row").each(function () { schFreqVisibility($(this)); });
+  $(document).on("change", ".sch-freq", function () {
+    schFreqVisibility($(this).closest(".sch-row"));
+  });
+
+  $("#schedule-save").on("click", function (e) {
+    e.preventDefault();
+    const schedules = {};
+    $(".sch-row").each(function () {
+      const p = $(this).data("provider");
+      schedules[p] = {
+        enabled: $(this).find(".sch-enabled").is(":checked") ? 1 : 0,
+        frequency: $(this).find(".sch-freq").val(),
+        hour: $(this).find(".sch-hour").val(),
+        weekday: $(this).find(".sch-weekday").val(),
+      };
+    });
+    const btn = $(this).prop("disabled", true).text("Guardando…");
+    $.post(
+      marpico_ajax.ajax_url,
+      { action: "marpico_schedule_save", security: marpico_ajax.nonce, schedules: schedules },
+      function (resp) {
+        if (resp && resp.success) {
+          $("#schedule-msg").html('<span style="color:#16a34a;">✓ Programación guardada.</span>');
+          $.each(resp.data.next || {}, function (p, val) {
+            $('.sch-row[data-provider="' + p + '"] .sch-next').text(val || "—");
+          });
+        } else {
+          $("#schedule-msg").html('<span style="color:#ef4444;">❌ ' + (resp && resp.data ? resp.data : "Error") + "</span>");
+        }
+      },
+    ).always(function () {
+      btn.prop("disabled", false).text("Guardar programación");
+    });
+  });
+
+  $(document).on("click", ".sch-run", function (e) {
+    e.preventDefault();
+    const p = $(this).closest(".sch-row").data("provider");
+    const btn = $(this).prop("disabled", true).text("Iniciando…");
+    $.post(
+      marpico_ajax.ajax_url,
+      { action: "marpico_schedule_run_now", security: marpico_ajax.nonce, provider: p },
+      function (resp) {
+        $("#schedule-msg").html(
+          resp && resp.success
+            ? '<span style="color:#16a34a;">✓ Sincronización ' + p + ' iniciada. Ve a "Sincronización" para ver el progreso.</span>'
+            : '<span style="color:#ef4444;">❌ ' + (resp && resp.data ? resp.data : "Error") + "</span>",
+        );
+      },
+    ).always(function () {
+      btn.prop("disabled", false).text("Ejecutar ahora");
+    });
+  });
+
+  // Lanzar sincronización Marpico (catálogo completo) en segundo plano.
+  $("#sync-products-batch").on("click", function (e) {
+    e.preventDefault();
+    SYNC.start("marpico", {});
+  });
+
+  // ===================== Registro de actividad =====================
+  const LOGS = (function () {
+    let entries = [];
+    let level = "all";
+    let timer = null;
+
+    function levelColor(l) {
+      return l === "error" ? "#ef4444" : l === "warning" ? "#d97706" : l === "success" ? "#16a34a" : "#2271b1";
+    }
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      });
+    }
+
+    function render() {
+      const q = ($("#log-search").val() || "").toLowerCase();
+      const rows = entries.filter(function (e) {
+        if (level !== "all" && e.level !== level) return false;
+        if (q && (e.msg || "").toLowerCase().indexOf(q) < 0 && (e.ctx || "").toLowerCase().indexOf(q) < 0) return false;
+        return true;
+      });
+      const c = $("#marpico-logs-container");
+      if (!rows.length) {
+        c.html('<div style="color:#888;padding:12px;">Sin registros que coincidan.</div>');
+        return;
+      }
+      c.html(
+        rows.map(function (e) {
+          return (
+            '<div class="marpico-log-entry" style="border-left:3px solid ' + levelColor(e.level) +
+            ';padding:6px 10px;margin-bottom:2px;font-size:13px;">' +
+            '<span style="color:#888;">[' + esc(e.t) + "]</span> " +
+            (e.ctx ? '<span style="color:' + levelColor(e.level) + ';font-weight:600;">' + esc(e.ctx) + "</span> " : "") +
+            '<span class="marpico-log-message">' + esc(e.msg) + "</span></div>"
+          );
+        }).join(""),
+      );
+    }
+
+    function applyCounts(counts) {
+      $(".log-count").each(function () {
+        const k = $(this).data("c");
+        $(this).text(counts && counts[k] != null ? counts[k] : 0);
+      });
+    }
+
+    function load() {
+      $.post(
+        marpico_ajax.ajax_url,
+        { action: "marpico_get_logs", security: marpico_ajax.nonce },
+        function (resp) {
+          if (resp && resp.success) {
+            entries = resp.data.entries || [];
+            applyCounts(resp.data.counts);
+            render();
+          }
+        },
+      );
+    }
+
+    function startAuto() {
+      stopAuto();
+      if ($("#log-autorefresh").is(":checked")) timer = setInterval(load, 5000);
+    }
+    function stopAuto() {
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+
+    $(document).on("click", ".log-filter", function () {
+      $(".log-filter").removeClass("active");
+      $(this).addClass("active");
+      level = $(this).data("level");
+      render();
+    });
+    $(document).on("input", "#log-search", render);
+    $(document).on("click", "#log-refresh", function (e) { e.preventDefault(); load(); });
+    $(document).on("change", "#log-autorefresh", startAuto);
+    $(document).on("click", "#log-clear", function (e) {
+      e.preventDefault();
+      if (!confirm("¿Vaciar el registro de actividad?")) return;
+      $.post(marpico_ajax.ajax_url, { action: "marpico_clear_logs", security: marpico_ajax.nonce }, function (resp) {
+        if (resp && resp.success) { entries = []; applyCounts(resp.data.counts); render(); }
+      });
+    });
+    $(document).on("click", "#log-export", function (e) {
+      e.preventDefault();
+      const txt = entries
+        .map(function (x) { return "[" + x.t + "] " + (x.ctx ? x.ctx + " " : "") + (x.level || "").toUpperCase() + ": " + x.msg; })
+        .join("\n");
+      const blob = new Blob([txt], { type: "text/plain" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "marpico-registro.txt";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    // Auto-refresh solo mientras la pestaña Registro está a la vista.
+    $(document).on("click", ".marpico-nav-item", function () {
+      if ($(this).data("section") === "logs") { load(); startAuto(); }
+      else stopAuto();
+    });
+
+    return { load: load };
+  })();
+
+  $(document).ready(function () {
+    SYNC.init();
+    LOGS.load(); // precargar conteos/entradas
   });
 
   $(document).ready(() => {
@@ -476,6 +661,7 @@ jQuery(($) => {
   });
 
   // --- BestStock: Sincronización por Categoría en Batches ---
+  // --- BestStock: lanzar sincronización por categoría en segundo plano ---
   $("#sync-beststock-category").on("click", function (e) {
     e.preventDefault();
 
@@ -487,164 +673,20 @@ jQuery(($) => {
         : "";
 
     if (!categoryId) {
-      addLogEntry(
-        "Error: Debe ingresar un ID de categoría para BestStock",
-        "error",
-      );
+      addLogEntry("Error: Debe ingresar un ID de categoría para BestStock", "error");
       return;
     }
-
     if (!parentId) {
-      addLogEntry(
-        "Error: Debe seleccionar una categoría de WooCommerce",
-        "error",
-      );
+      addLogEntry("Error: Debe seleccionar una categoría de WooCommerce", "error");
       return;
     }
 
-    const btn = $(this);
-    btn.prop("disabled", true).text("Sincronizando...");
-
-    // Inicialización de sincronización
-    let syncInProgress = true;
-    let syncPaused = false;
-    let currentOffset = 0;
-    let retryCount = 0;
-    const maxRetries = 3;
-    const batchSize = 1; // Ajusta según limitación de API
-    let totalProcessed = 0;
-    let totalProducts = 0;
-    const syncStartTime = Date.now();
-
-    $("#api-sync-status").html(`
-    <div class="marpico-progress-container">
-      <div class="marpico-progress-bar">
-        <div class="marpico-progress-fill" style="width: 0%"></div>
-      </div>
-      <div class="marpico-progress-text">Iniciando sincronización...</div>
-      <div class="sync-controls">
-        <button id="pause-sync" class="marpico-btn">Pausar Sincronización</button>
-        <button id="cancel-sync" class="marpico-btn" style="background: #ef4444; color: white;">Cancelar Sincronización</button>
-      </div>
-    </div>
-  `);
-
-    $("#pause-sync").on("click", () => {
-      if (syncPaused) {
-        syncPaused = false;
-        $("#pause-sync").text("Pausar Sincronización");
-        addLogEntry("Sincronización reanudada", "info");
-        processBatch();
-      } else {
-        syncPaused = true;
-        $("#pause-sync").text("Reanudar Sincronización");
-        addLogEntry("Sincronización pausada", "warning");
-      }
+    SYNC.start("beststock", {
+      category_id: categoryId,
+      wc_category_parent: parentId,
+      wc_category_child: childId,
+      batch_size: 1,
     });
-
-    $("#cancel-sync").on("click", () => {
-      syncInProgress = false;
-      const elapsed = formatElapsedTime(syncStartTime);
-      addLogEntry(
-        `Sincronización cancelada en ${elapsed} (offset ${currentOffset})`,
-        "warning",
-      );
-      btn.prop("disabled", false).text("Sincronizar Categoría");
-      $("#api-sync-status").html("");
-    });
-
-    function processBatch() {
-      if (!syncInProgress || syncPaused) return;
-
-      $.ajax({
-        url: marpico_ajax.ajax_url,
-        type: "POST",
-        timeout: 60000, // 60s
-        data: {
-          action: "beststock_sync_batch",
-          security: marpico_ajax.nonce,
-          category_id: categoryId,
-          offset: currentOffset,
-          batch_size: batchSize,
-          wc_category_parent: parentId,
-          wc_category_child: childId,
-        },
-        success(resp) {
-          retryCount = 0;
-
-          if (!resp.success) {
-            return handleBatchError(resp.data || "Error desconocido");
-          }
-
-          const data = resp.data || {};
-          totalProcessed += data.processed;
-          totalProducts = data.total;
-
-          const percentage =
-            totalProducts > 0
-              ? Math.round((totalProcessed / totalProducts) * 100)
-              : 0;
-
-          $(".marpico-progress-fill").css("width", percentage + "%");
-          $(".marpico-progress-text").text(
-            `${percentage}% - Procesados ${totalProcessed} de ${totalProducts} productos`,
-          );
-
-          addLogEntry(
-            `Lote procesado: ${data.processed} productos (offset ${currentOffset})`,
-            "info",
-          );
-
-          currentOffset += batchSize;
-
-          if (currentOffset < totalProducts) {
-            setTimeout(() => processBatch(), 500); // pequeña pausa
-          } else {
-            syncInProgress = false;
-            const elapsed = formatElapsedTime(syncStartTime);
-            const message = `Categoría ${categoryId} sincronizada exitosamente en ${elapsed}`;
-            addLogEntry(message, "success");
-            $("#api-sync-status").html(
-              `<span class="beststock-log-success">✓ ${message}</span>`,
-            );
-            btn.prop("disabled", false).text("Sincronizar Categoría");
-          }
-        },
-        error(xhr) {
-          let errorMsg = `Error de conexión (HTTP ${
-            xhr.status || "desconocido"
-          })`;
-          handleBatchError(errorMsg);
-        },
-      });
-    }
-
-    function handleBatchError(errorMsg) {
-      retryCount++;
-      if (retryCount <= maxRetries) {
-        const retryDelay = 5000 * Math.pow(2, retryCount - 1); // exponential backoff
-        addLogEntry(
-          `Error: ${errorMsg}. Reintentando lote ${retryCount}/${maxRetries} en ${
-            retryDelay / 1000
-          }s`,
-          "error",
-        );
-
-        setTimeout(() => {
-          processBatch();
-        }, retryDelay);
-      } else {
-        syncInProgress = false;
-        const elapsed = formatElapsedTime(syncStartTime);
-        addLogEntry(
-          `Error persistente: ${errorMsg}. Lote detenido tras ${retryCount} intentos. Procesados hasta offset ${currentOffset} en ${elapsed}`,
-          "error",
-        );
-        btn.prop("disabled", false).text("Sincronizar Categoría");
-      }
-    }
-
-    processBatch(); // iniciar primer lote
   });
 
   // --- Cargar subcategorías dinámicamente ---
@@ -694,396 +736,9 @@ jQuery(($) => {
 
   console.log("Script cargado correctamente");
 
-  $("#marpico_aplicar_aumento").on("click", function () {
-    console.log("Botón clickeado");
-
-    const incremento = parseFloat($("#marpico_precio_incremento").val());
-    const marca = parseInt($("#marpico_marca").val()); // NUEVO: marca seleccionada
-    const excluidas = $("input[name='excluded_categories[]']:checked")
-      .map(function () {
-        return $(this).val();
-      })
-      .get();
-
-    console.log("Incremento:", incremento);
-    console.log("Marca:", marca);
-    console.log("Categorías excluidas:", excluidas);
-
-    if (!incremento || incremento === 0) {
-      alert("Por favor ingresa un valor válido para el aumento.");
-      return;
-    }
-
-    if (!marca || marca === 0) {
-      alert("Por favor selecciona una marca.");
-      return;
-    }
-
-    // Mostrar mensaje de carga
-    const boton = $(this);
-    boton.prop("disabled", true).text("Aplicando aumento...");
-    $("#marpico_status_msg").remove();
-    boton.after(
-      "<p id='marpico_status_msg'> Aplicando aumento, por favor espera...</p>",
-    );
-
-    $.ajax({
-      url: marpico_ajax.ajax_url,
-      type: "POST",
-      dataType: "json",
-      data: {
-        action: "marpico_aplicar_aumento", // coincide con PHP
-        security: marpico_ajax.nonce,
-        incremento: incremento, // monto fijo
-        marca: marca, // ID de la marca
-        categoriasExcluidas: excluidas, // array de categorías
-      },
-      beforeSend: function () {
-        console.log("Enviando petición AJAX...");
-      },
-      success: function (response) {
-        console.log("Respuesta del servidor:", response);
-        alert("Ajuste completado: " + response.data);
-
-        // Limpiar campos después de aplicar
-        $("#marpico_precio_incremento").val("");
-        $("#marpico_marca").val("");
-        $("input[name='excluded_categories[]']").prop("checked", false);
-      },
-      error: function (xhr, status, error) {
-        console.error("Error en AJAX:", error);
-        alert("Hubo un error al aplicar el aumento. Revisa la consola.");
-      },
-      complete: function () {
-        // Restaurar botón y quitar mensaje
-        boton.prop("disabled", false).text("Aplicar aumento");
-        $("#marpico_status_msg").text("Proceso completado");
-        setTimeout(() => $("#marpico_status_msg").fadeOut(), 2000);
-      },
-    });
-  });
-
-  $(document).on("click", "#marpico_aplicar_aumento_marca", function () {
-    console.log("Botón aumento por marca clickeado");
-
-    const porcentaje = parseFloat($("#marpico_porcentaje_incremento").val());
-    const marca = $("#marpico_marca_select").val();
-    const excluidas = $("input[name='excluded_categories_brand[]']:checked")
-      .map(function () {
-        return $(this).val();
-      })
-      .get();
-
-    const excluidasMarcas = $("input[name='excluded_brands[]']:checked")
-      .map(function () {
-        return $(this).val();
-      })
-      .get();
-
-    console.log("Porcentaje:", porcentaje);
-    console.log("Marca:", marca);
-    console.log("Categorías excluidas:", excluidas);
-    console.log("Marcas excluidas:", excluidasMarcas);
-
-    if (!porcentaje || porcentaje === 0) {
-      alert("Por favor ingresa un porcentaje válido.");
-      return;
-    }
-
-    if (!marca) {
-      alert("Debes seleccionar una marca.");
-      return;
-    }
-
-    const boton = $(this);
-    boton.prop("disabled", true).text("Aplicando aumento...");
-
-    $("#marpico_status_msg_marca").remove();
-
-    boton.after(
-      "<p id='marpico_status_msg_marca'>Aplicando aumento por marca, por favor espera...</p>",
-    );
-
-    $.ajax({
-      url: marpico_ajax.ajax_url,
-      type: "POST",
-      dataType: "json",
-      data: {
-        action: "marpico_aplicar_aumento_marca",
-        security: marpico_ajax.nonce,
-        porcentaje: porcentaje,
-        marca: marca,
-        categoriasExcluidas: excluidas,
-        marcasExcluidas: excluidasMarcas,
-      },
-
-      beforeSend: function () {
-        console.log("Enviando petición AJAX aumento por marca...");
-      },
-
-      success: function (response) {
-        console.log("Respuesta del servidor:", response);
-
-        alert("Ajuste por marca completado: " + response.data);
-
-        // limpiar campos
-        $("#marpico_porcentaje_incremento").val("");
-        $("#marpico_marca_select").val("");
-        $("input[name='excluded_categories[]']").prop("checked", false);
-      },
-
-      error: function (xhr, status, error) {
-        console.error("Error en AJAX:", error);
-        console.log(xhr.responseText);
-        alert("Hubo un error al aplicar el aumento.");
-      },
-
-      complete: function () {
-        boton.prop("disabled", false).text("Aplicar aumento por marca");
-
-        $("#marpico_status_msg_marca").text("Proceso completado");
-
-        setTimeout(() => $("#marpico_status_msg_marca").fadeOut(), 2000);
-      },
-    });
-  });
-
+  // --- CDO: lanzar sincronización (catálogo completo) en segundo plano ---
   $("#test-provider").on("click", function (e) {
     e.preventDefault();
-    var btn = $(this);
-
-    if (syncInProgress) {
-      if (syncPaused) {
-        syncPaused = false;
-        btn.text("Pausar Sincronización");
-        addLogEntry("Sincronización reanudada", "info");
-        resumeSync();
-      } else {
-        syncPaused = true;
-        btn.text("Reanudar Sincronización");
-        addLogEntry("Sincronización pausada", "warning");
-      }
-      return;
-    }
-
-    syncStartTime = Date.now();
-    syncInProgress = true;
-    syncPaused = false;
-    currentOffset = 0;
-    retryCount = 0;
-
-    var totalProcessed = 0;
-    var totalProducts = 0;
-    var batchSize = 10;
-
-    btn.text("Pausar Sincronización").addClass("marpico-btn-secondary");
-    addLogEntry(
-      `Iniciando sincronización por lotes de ${batchSize} productos`,
-      "info",
-    );
-
-    $("#cdo-sync-status-batch").html(`
-      <div class="marpico-progress-container">
-        <div class="marpico-progress-bar">
-          <div class="marpico-progress-fill" style="width: 0%"></div>
-        </div>
-        <div class="marpico-progress-text">Iniciando sincronización...</div>
-        <div class="sync-controls">
-          <button id="cancel-sync" class="marpico-btn" style="background: #ef4444; color: white;">Cancelar Sincronización</button>
-        </div>
-      </div>
-    `);
-
-    $("#cancel-sync").on("click", () => {
-      cancelSync();
-    });
-
-    function cancelSync() {
-      syncInProgress = false;
-      syncPaused = false;
-      const elapsedTime = formatElapsedTime(syncStartTime);
-      const message = `Sincronización cancelada. Procesados ${totalProcessed} productos en ${elapsedTime}`;
-
-      $("#cdo-sync-status-batch").html(
-        `<span style="color: orange;">⚠ ${message}</span>`,
-      );
-      addLogEntry(message, "info");
-      btn
-        .prop("disabled", false)
-        .text("Sincronizar Productos por Lotes")
-        .removeClass("marpico-btn-secondary");
-    }
-
-    function resumeSync() {
-      if (!syncPaused && syncInProgress) {
-        syncBatch(currentOffset);
-      }
-    }
-
-    function syncBatch(offset) {
-      if (syncPaused || !syncInProgress) {
-        return;
-      }
-
-      currentOffset = offset;
-      batchStartTime = Date.now();
-
-      console.log(
-        `[v0] [${getCurrentTimestamp()}] Iniciando lote en offset: ${offset}`,
-      );
-      var currentPercentage =
-        totalProducts > 0
-          ? Math.round((totalProcessed / totalProducts) * 100)
-          : 0;
-      $(".marpico-progress-text").text(
-        `${currentPercentage}% - Procesando lote desde posición ${offset}...`,
-      );
-
-      $.post(
-        marpico_ajax.ajax_url,
-        {
-          action: "marpico_sync_batch",
-          security: marpico_ajax.nonce,
-          offset: offset,
-          batch_size: batchSize,
-        },
-        (resp) => {
-          const batchElapsed = formatElapsedTime(batchStartTime);
-          console.log(
-            `[v0] [${getCurrentTimestamp()}] Respuesta recibida en ${batchElapsed}:`,
-            resp,
-          );
-
-          if (resp.success) {
-            retryCount = 0;
-            var data = resp.data;
-            totalProcessed += data.result.processed;
-            totalProducts = data.result.total;
-
-            var percentage = Math.round((totalProcessed / totalProducts) * 100);
-
-            $(".marpico-progress-fill")
-              .css("width", percentage + "%")
-              .get(0).offsetHeight;
-            $(".marpico-progress-text")
-              .text(
-                `${percentage}% - Procesados ${totalProcessed} de ${totalProducts} productos`,
-              )
-              .get(0).offsetHeight;
-
-            const logMessage = `Lote completado: ${resp.data.result.processed} productos en ${batchElapsed} (${percentage}% total)`;
-            addLogEntry(logMessage, "success");
-            console.log(`[v0] [${getCurrentTimestamp()}] ${logMessage}`);
-
-            updateStats();
-
-            if (data.result.has_more && syncInProgress && !syncPaused) {
-              setTimeout(() => {
-                syncBatch(data.result.next_offset);
-              }, 200);
-            } else if (!data.result.has_more) {
-              syncInProgress = false;
-              const totalElapsed = formatElapsedTime(syncStartTime);
-              const completionMessage = `✓ Sincronización completada: ${totalProcessed} productos procesados en ${totalElapsed}`;
-
-              console.log(
-                `[v0] [${getCurrentTimestamp()}] ${completionMessage}`,
-              );
-              addLogEntry(completionMessage, "success");
-
-              $("#cdo-sync-status-batch").html(
-                `<div class="marpico-log-success" style="padding: 16px; text-align: center; font-weight: 600;">${completionMessage}</div>`,
-              );
-              btn
-                .prop("disabled", false)
-                .text("Sincronizar Productos por Lotes")
-                .removeClass("marpico-btn-secondary");
-              updateStats();
-            }
-          } else {
-            const errorMessage = `Error en lote (offset ${offset}): ${
-              resp.data || "Error desconocido"
-            }`;
-            console.log(`[v0] [${getCurrentTimestamp()}] ${errorMessage}`);
-            addLogEntry(errorMessage, "error");
-            handleSyncError(resp.data || "Error desconocido", offset);
-          }
-        },
-      ).fail((xhr) => {
-        const batchElapsed = formatElapsedTime(batchStartTime);
-        let errorMsg = "Error de conexión";
-        if (xhr.status === 0) {
-          errorMsg = "Sin conexión a internet o servidor no disponible";
-        } else if (xhr.status === 500) {
-          errorMsg = "Error interno del servidor";
-        } else if (xhr.status === 504) {
-          errorMsg = "Timeout del servidor";
-        }
-
-        const fullErrorMsg = `${errorMsg} después de ${batchElapsed} (offset ${offset})`;
-        console.log(
-          `[v0] [${getCurrentTimestamp()}] Error AJAX: ${xhr.status} ${
-            xhr.statusText
-          } - ${fullErrorMsg}`,
-        );
-        addLogEntry(fullErrorMsg, "error");
-        handleSyncError(errorMsg, offset);
-      });
-    }
-
-    function handleSyncError(errorMsg, offset) {
-      retryCount++;
-
-      if (retryCount <= maxRetries) {
-        const retryMessage = `Reintentando lote ${retryCount}/${maxRetries} en 5 segundos (offset ${offset})`;
-        addLogEntry(retryMessage, "info");
-
-        $(".marpico-progress-text").html(`
-          Error: ${errorMsg}<br>
-          <div class="retry-info">${retryMessage}</div>
-        `);
-
-        setTimeout(() => {
-          if (syncInProgress && !syncPaused) {
-            syncBatch(offset);
-          }
-        }, 5000);
-      } else {
-        syncInProgress = false;
-        const elapsedTime = formatElapsedTime(syncStartTime);
-        const finalErrorMsg = `Error después de ${maxRetries} intentos: ${errorMsg}. Procesados ${totalProcessed} productos en ${elapsedTime}`;
-
-        console.log(`[v0] [${getCurrentTimestamp()}] ${finalErrorMsg}`);
-        addLogEntry(finalErrorMsg, "error");
-
-        $("#cdo-sync-status-batch").html(`
-          <span style="color: red;">❌ ${finalErrorMsg}</span><br>
-          <button id="resume-from-error" class="marpico-btn" style="margin-top: 10px; background: #0073aa; color: white;">Continuar desde donde se quedó</button>
-        `);
-
-        $("#resume-from-error").on("click", function () {
-          retryCount = 0;
-          syncInProgress = true;
-          syncPaused = false;
-          syncStartTime = Date.now(); // Reiniciar tiempo
-          btn.text("Pausar Sincronización").addClass("marpico-btn-secondary");
-          addLogEntry("Reanudando sincronización desde error", "info");
-          $(this)
-            .parent()
-            .html(
-              '<div class="marpico-progress-text">Reanudando sincronización...</div>',
-            );
-          setTimeout(() => {
-            syncBatch(currentOffset);
-          }, 1000);
-        });
-
-        btn
-          .prop("disabled", false)
-          .text("Sincronizar Productos por Lotes")
-          .removeClass("marpico-btn-secondary");
-      }
-    }
-    syncBatch(0);
+    SYNC.start("cdo", {});
   });
 });
