@@ -646,6 +646,19 @@
                 </div>
 
                 <div class="marpico-section" style="max-width:760px">
+                    <?php
+                        $sch_tz     = function_exists( 'wp_timezone_string' ) ? wp_timezone_string() : get_option( 'timezone_string' );
+                        if ( empty( $sch_tz ) ) $sch_tz = 'UTC';
+                        $sch_off    = (float) get_option( 'gmt_offset', 0 );
+                        $sch_off_s  = 'UTC' . ( $sch_off >= 0 ? '+' : '' ) . rtrim( rtrim( (string) $sch_off, '0' ), '.' );
+                    ?>
+                    <p style="background:#e7f5ff;border:1px solid #a5d8ff;padding:8px 12px;border-radius:6px;font-size:14px;">
+                        🕒 Hora actual del servidor:
+                        <strong><span id="sched-clock" data-ts="<?php echo esc_attr( current_time( 'U' ) ); ?>"><?php echo esc_html( current_time( 'Y-m-d H:i:s' ) ); ?></span></strong>
+                        &nbsp;·&nbsp; Zona horaria: <strong><?php echo esc_html( $sch_tz ); ?></strong> (<?php echo esc_html( $sch_off_s ); ?>).
+                        <br><small>Programa la hora <strong>en esta zona</strong> (la del sitio en Ajustes → Generales), no en tu hora local.</small>
+                    </p>
+
                     <p style="background:#fff8e1;border:1px solid #ffe08a;padding:8px 12px;border-radius:6px;font-size:13px;">
                         ⚠ La programación usa WP-Cron: dispara con el tráfico del sitio o con un cron real
                         (en producción, un cron de cPanel a <code>wp-cron.php</code>). BestStock no se programa

@@ -11,6 +11,38 @@ jQuery(($) => {
   let batchStartTime = null;
   let syncMode = "batch"; // 'batch' or 'individual'
 
+  // POST a admin-ajax con auto-recuperación de nonce vencido/cacheado.
+  // Si la respuesta es -1 o 403 (nonce inválido), pide un nonce fresco y reintenta 1 vez.
+  function mpPost(data, done, _retried) {
+    return $.post(
+      marpico_ajax.ajax_url,
+      Object.assign({ security: marpico_ajax.nonce }, data),
+      function (resp) {
+        if (!_retried && (resp === -1 || resp === "-1")) {
+          $.post(marpico_ajax.ajax_url, { action: "marpico_refresh_nonce" }, function (r) {
+            if (r && r.success && r.data && r.data.nonce) {
+              marpico_ajax.nonce = r.data.nonce;
+              mpPost(data, done, true);
+            } else if (done) {
+              done(resp);
+            }
+          });
+          return;
+        }
+        if (done) done(resp);
+      },
+    ).fail(function (xhr) {
+      if (!_retried && xhr && xhr.status === 403) {
+        $.post(marpico_ajax.ajax_url, { action: "marpico_refresh_nonce" }, function (r) {
+          if (r && r.success && r.data && r.data.nonce) {
+            marpico_ajax.nonce = r.data.nonce;
+            mpPost(data, done, true);
+          }
+        });
+      }
+    });
+  }
+
   function formatElapsedTime(startTime) {
     const elapsed = Date.now() - startTime;
     const seconds = Math.floor(elapsed / 1000);
@@ -116,11 +148,9 @@ jQuery(($) => {
       "info",
     );
 
-    $.post(
-      marpico_ajax.ajax_url,
+    mpPost(
       {
         action: "marpico_sync_product_individual",
-        security: marpico_ajax.nonce,
         product_code: productCode,
       },
       (resp) => {
@@ -157,22 +187,15 @@ jQuery(($) => {
   }
 
   function updateStats() {
-    $.post(
-      marpico_ajax.ajax_url,
-      {
-        action: "marpico_get_sync_stats",
-        security: marpico_ajax.nonce,
-      },
-      (resp) => {
-        if (resp.success) {
-          const stats = resp.data;
-          $("#total-products-stat").text(stats.total_products || "0");
-          $("#last-sync-stat").text(stats.last_sync || "Nunca");
-          $("#sync-errors-stat").text(stats.sync_errors || "0");
-          $("#api-status-stat").text(stats.api_status || "Desconocido");
-        }
-      },
-    );
+    mpPost({ action: "marpico_get_sync_stats" }, (resp) => {
+      if (resp && resp.success) {
+        const stats = resp.data;
+        $("#total-products-stat").text(stats.total_products || "0");
+        $("#last-sync-stat").text(stats.last_sync || "Nunca");
+        $("#sync-errors-stat").text(stats.sync_errors || "0");
+        $("#api-status-stat").text(stats.api_status || "Desconocido");
+      }
+    });
   }
 
   // ===================== Sincronización en segundo plano =====================
@@ -227,11 +250,7 @@ jQuery(($) => {
       });
     }
     function ajax(action, extra, cb) {
-      $.post(
-        marpico_ajax.ajax_url,
-        Object.assign({ action: action, security: marpico_ajax.nonce }, extra || {}),
-        cb,
-      );
+      mpPost(Object.assign({ action: action }, extra || {}), cb);
     }
 
     function render(job) {
@@ -381,19 +400,17 @@ jQuery(($) => {
   $("#price-save").on("click", function (e) {
     e.preventDefault();
     const btn = $(this).prop("disabled", true).text("Guardando…");
-    $.post(
-      marpico_ajax.ajax_url,
-      Object.assign({ action: "marpico_price_save", security: marpico_ajax.nonce }, priceFormData()),
+    mpPost(
+      Object.assign({ action: "marpico_price_save" }, priceFormData()),
       function (resp) {
         $("#price-save-msg").html(
           resp && resp.success
             ? '<span style="color:#16a34a;">✓ Configuración guardada.</span>'
             : '<span style="color:#ef4444;">❌ ' + (resp && resp.data ? resp.data : "Error") + "</span>",
         );
+        btn.prop("disabled", false).text("Guardar configuración");
       },
-    ).always(function () {
-      btn.prop("disabled", false).text("Guardar configuración");
-    });
+    );
   });
 
   $("#price-apply").on("click", function (e) {
@@ -428,6 +445,23 @@ jQuery(($) => {
     schFreqVisibility($(this).closest(".sch-row"));
   });
 
+  // Reloj vivo con la hora del servidor (el data-ts trae la hora local del sitio
+  // "horneada" como epoch; se avanza desde el momento de carga).
+  (function () {
+    const el = document.getElementById("sched-clock");
+    if (!el) return;
+    const baked = parseInt(el.getAttribute("data-ts"), 10) * 1000; // ms (hora local del sitio)
+    if (!baked) return;
+    const start = Date.now();
+    const p = (n) => (n < 10 ? "0" + n : "" + n);
+    setInterval(function () {
+      const d = new Date(baked + (Date.now() - start));
+      el.textContent =
+        d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate()) +
+        " " + p(d.getUTCHours()) + ":" + p(d.getUTCMinutes()) + ":" + p(d.getUTCSeconds());
+    }, 1000);
+  })();
+
   $("#schedule-save").on("click", function (e) {
     e.preventDefault();
     const schedules = {};
@@ -441,9 +475,8 @@ jQuery(($) => {
       };
     });
     const btn = $(this).prop("disabled", true).text("Guardando…");
-    $.post(
-      marpico_ajax.ajax_url,
-      { action: "marpico_schedule_save", security: marpico_ajax.nonce, schedules: schedules },
+    mpPost(
+      { action: "marpico_schedule_save", schedules: schedules },
       function (resp) {
         if (resp && resp.success) {
           $("#schedule-msg").html('<span style="color:#16a34a;">✓ Programación guardada.</span>');
@@ -453,29 +486,26 @@ jQuery(($) => {
         } else {
           $("#schedule-msg").html('<span style="color:#ef4444;">❌ ' + (resp && resp.data ? resp.data : "Error") + "</span>");
         }
+        btn.prop("disabled", false).text("Guardar programación");
       },
-    ).always(function () {
-      btn.prop("disabled", false).text("Guardar programación");
-    });
+    );
   });
 
   $(document).on("click", ".sch-run", function (e) {
     e.preventDefault();
     const p = $(this).closest(".sch-row").data("provider");
     const btn = $(this).prop("disabled", true).text("Iniciando…");
-    $.post(
-      marpico_ajax.ajax_url,
-      { action: "marpico_schedule_run_now", security: marpico_ajax.nonce, provider: p },
+    mpPost(
+      { action: "marpico_schedule_run_now", provider: p },
       function (resp) {
         $("#schedule-msg").html(
           resp && resp.success
             ? '<span style="color:#16a34a;">✓ Sincronización ' + p + ' iniciada. Ve a "Sincronización" para ver el progreso.</span>'
             : '<span style="color:#ef4444;">❌ ' + (resp && resp.data ? resp.data : "Error") + "</span>",
         );
+        btn.prop("disabled", false).text("Ejecutar ahora");
       },
-    ).always(function () {
-      btn.prop("disabled", false).text("Ejecutar ahora");
-    });
+    );
   });
 
   // Lanzar sincronización Marpico (catálogo completo) en segundo plano.
@@ -532,17 +562,13 @@ jQuery(($) => {
     }
 
     function load() {
-      $.post(
-        marpico_ajax.ajax_url,
-        { action: "marpico_get_logs", security: marpico_ajax.nonce },
-        function (resp) {
-          if (resp && resp.success) {
-            entries = resp.data.entries || [];
-            applyCounts(resp.data.counts);
-            render();
-          }
-        },
-      );
+      mpPost({ action: "marpico_get_logs" }, function (resp) {
+        if (resp && resp.success) {
+          entries = resp.data.entries || [];
+          applyCounts(resp.data.counts);
+          render();
+        }
+      });
     }
 
     function startAuto() {
@@ -565,7 +591,7 @@ jQuery(($) => {
     $(document).on("click", "#log-clear", function (e) {
       e.preventDefault();
       if (!confirm("¿Vaciar el registro de actividad?")) return;
-      $.post(marpico_ajax.ajax_url, { action: "marpico_clear_logs", security: marpico_ajax.nonce }, function (resp) {
+      mpPost({ action: "marpico_clear_logs" }, function (resp) {
         if (resp && resp.success) { entries = []; applyCounts(resp.data.counts); render(); }
       });
     });
