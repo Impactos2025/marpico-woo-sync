@@ -13,7 +13,9 @@ class GitHub_Updater {
 
     public function __construct($file, $github_url) {
         $this->file       = $file;
-        $this->plugin     = get_plugin_data($file);
+        // $markup=false, $translate=false: no traducir el header evita cargar el
+        // text domain antes de 'init' (Notice _load_textdomain_just_in_time en WP 6.7+).
+        $this->plugin     = get_plugin_data($file, false, false);
         $this->basename   = plugin_basename($file);
         $this->active     = is_plugin_active($this->basename);
         $this->github_url = $github_url;
