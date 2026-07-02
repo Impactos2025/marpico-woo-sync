@@ -42,6 +42,9 @@ class Marpico_Admin {
         add_action( 'wp_ajax_marpico_get_logs',   [ $this, 'ajax_get_logs' ] );
         add_action( 'wp_ajax_marpico_clear_logs', [ $this, 'ajax_clear_logs' ] );
 
+        // Refresco de nonce (auto-recuperación ante nonce vencido/cacheado)
+        add_action( 'wp_ajax_marpico_refresh_nonce', [ $this, 'ajax_refresh_nonce' ] );
+
         // Reconciliación de categorías (mapeo multi-proveedor)
         add_action( 'wp_ajax_marpico_category_reconcile', [ $this, 'ajax_category_reconcile' ] );
         add_action( 'wp_ajax_marpico_category_map_save', [ $this, 'ajax_category_map_save' ] );
@@ -139,6 +142,12 @@ class Marpico_Admin {
     }
 
     public function settings_page() {
+        // Evita que cachés (SiteGround/CDN/opt. de JS) sirvan la página con un
+        // nonce obsoleto → causaría 403 "-1" en las peticiones AJAX.
+        if ( ! defined( 'DONOTCACHEPAGE' ) )   define( 'DONOTCACHEPAGE', true );
+        if ( ! defined( 'DONOTCACHEOBJECT' ) ) define( 'DONOTCACHEOBJECT', true );
+        nocache_headers();
+
         include_once( MARPICO_WOO_SYNC_PATH . 'admin-interface.html' );
     }
 
@@ -696,6 +705,19 @@ class Marpico_Admin {
             'sync_errors'    => (int) ( $job['failed'] ?? 0 ),
             'api_status'     => ( ( $job['status'] ?? '' ) === 'failed' ) ? 'Error' : ( $running ? 'Sincronizando' : 'OK' ),
         ] );
+    }
+
+    /**
+     * AJAX: entrega un nonce fresco a un admin autenticado. Sin check_ajax_referer
+     * a propósito (es lo que se usa para recuperarse de un nonce vencido). Seguro:
+     * requiere sesión con manage_options y, por la política de mismo origen, un
+     * atacante no puede leer la respuesta cross-origin.
+     */
+    public function ajax_refresh_nonce() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( 'No permission', 403 );
+        }
+        wp_send_json_success( [ 'nonce' => wp_create_nonce( 'marpico_sync_nonce' ) ] );
     }
 
     /* ===================== Registro de actividad ===================== */
