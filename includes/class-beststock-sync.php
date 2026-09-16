@@ -181,6 +181,9 @@ class BestStock_Sync {
                 $product->set_regular_price($prod['price_scale'][0]['price']);
             }
         }
+        // Evita que un objeto sin slug provoque la regeneración de la URL.
+        Manual_Edits::ensure_slug($product);
+
         $product_id = $product->save();
 
         if ($aplicar_titulo) {

@@ -46,6 +46,33 @@ class Manual_Edits {
     }
 
     /**
+     * Red de seguridad para el slug (post_name) de un producto.
+     *
+     * WooCommerce escribe `post_name => $product->get_slug('edit')` en cada
+     * guardado. Si el objeto llegara sin slug, se guardaría vacío y WordPress lo
+     * regeneraría a partir del título: la URL del producto cambiaría y las
+     * antiguas empezarían a dar 404.
+     *
+     * Esto no debería ocurrir con un objeto leído de la base de datos, pero la
+     * comprobación es barata y evita que un cambio futuro rompa las URLs.
+     *
+     * @param WC_Product $product Producto a punto de guardarse.
+     */
+    public static function ensure_slug( $product ) {
+        if ( ! $product instanceof WC_Product ) return;
+
+        $product_id = $product->get_id();
+        if ( ! $product_id ) return; // Producto nuevo: WordPress genera el slug.
+
+        if ( '' !== (string) $product->get_slug( 'edit' ) ) return;
+
+        $slug = get_post_field( 'post_name', $product_id );
+        if ( $slug ) {
+            $product->set_slug( $slug );
+        }
+    }
+
+    /**
      * Registra el título que acaba de escribir el sincronizador.
      *
      * Sólo debe llamarse cuando el título se ha aplicado de verdad; si se
