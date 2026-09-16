@@ -548,12 +548,12 @@ class CDO_Sync {
 
         }
 
-        // asignar al producto
-        wp_set_object_terms(
+        // asignar al producto sin retirar marcas puestas a mano
+        Category_Mapper::assign_terms_preserving_manual(
             $product_id,
-            $term_id,
+            array( $term_id ),
             $taxonomy,
-            false
+            Category_Mapper::META_SYNCED_BRAND
         );
 
     }
