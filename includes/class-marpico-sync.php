@@ -551,19 +551,46 @@ class Marpico_Sync {
     private function find_product_by_family( $family ) {
         global $wpdb;
 
-        // Buscar por _external_family
+        // Buscar por _external_family. Sólo productos publicados o borradores:
+        // con metadatos repetidos, quedarse con cualquier post lleva a actualizar
+        // el equivocado.
         $rows = $wpdb->get_col( $wpdb->prepare(
-            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_external_family' AND meta_value = %s",
+            "SELECT p.ID
+             FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = '_external_family'
+             WHERE m.meta_value = %s
+               AND p.post_type = 'product'
+               AND p.post_status NOT IN ('trash', 'auto-draft')
+             ORDER BY p.ID ASC",
             $family
         ) );
+
         if ( ! empty( $rows ) ) {
+            if ( count( $rows ) > 1 ) {
+                $this->log( "Familia duplicada '{$family}' en los productos " . implode( ', ', $rows ) . "; se usa el " . $rows[0] );
+            }
             return intval( $rows[0] );
         }
 
-        // Si no existe, buscar por SKU
-        $product_id = wc_get_product_id_by_sku( $family );
-        if ( $product_id ) {
-            return $product_id;
+        // Si no existe, buscar por SKU. No se usa wc_get_product_id_by_sku()
+        // porque devuelve también variaciones: si una variación comparte el
+        // código de familia, el sync acabaría escribiendo sobre la variación.
+        $rows = $wpdb->get_col( $wpdb->prepare(
+            "SELECT p.ID
+             FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = '_sku'
+             WHERE m.meta_value = %s
+               AND p.post_type = 'product'
+               AND p.post_status NOT IN ('trash', 'auto-draft')
+             ORDER BY p.ID ASC",
+            $family
+        ) );
+
+        if ( ! empty( $rows ) ) {
+            if ( count( $rows ) > 1 ) {
+                $this->log( "SKU duplicado '{$family}' en los productos " . implode( ', ', $rows ) . "; se usa el " . $rows[0] );
+            }
+            return intval( $rows[0] );
         }
 
         return 0;

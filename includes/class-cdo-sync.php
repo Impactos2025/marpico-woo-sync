@@ -125,6 +125,9 @@ class CDO_Sync {
         }
         $wc_product->set_description($description);
 
+        // Evita que un objeto sin slug provoque la regeneración de la URL.
+        Manual_Edits::ensure_slug($wc_product);
+
         $product_id = $wc_product->save();
 
         if ($aplicar_titulo) {
@@ -182,20 +185,30 @@ class CDO_Sync {
 
         global $wpdb;
 
+        // Sólo productos: un SKU repetido en una variación haría que el sync
+        // tratara la variación como si fuera el producto padre.
         $rows = $wpdb->get_col(
             $wpdb->prepare(
-                "SELECT post_id 
-                FROM {$wpdb->postmeta} 
-                WHERE meta_key = '_sku' 
-                AND meta_value = %s",
+                "SELECT p.ID
+                 FROM {$wpdb->posts} p
+                 INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = '_sku'
+                 WHERE m.meta_value = %s
+                   AND p.post_type = 'product'
+                   AND p.post_status NOT IN ('trash', 'auto-draft')
+                 ORDER BY p.ID ASC",
                 $code
             )
         );
 
-        if (!empty($rows)) {
-            return intval($rows[0]);
+        if (empty($rows)) {
+            return 0;
         }
-        return 0;
+
+        if (count($rows) > 1) {
+            $this->log("SKU duplicado '{$code}' en los productos " . implode(', ', $rows) . "; se usa el " . $rows[0]);
+        }
+
+        return intval($rows[0]);
     }
 
     private function sync_product_variations_cdo( $product_id, $product, $title ) {
