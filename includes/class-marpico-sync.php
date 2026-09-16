@@ -17,11 +17,22 @@ class Marpico_Sync {
             return new WP_Error( 'no_data', 'No se encontraron datos para la familia ' . $family_code );
         }
 
-        $materials = $res;
-        $first = $materials[0];
+        // materialesAPIByProducto ha devuelto dos formas distintas: un array plano
+        // de materiales ([ {...} ]) y el objeto de la familia directamente ({...}).
+        // Se admiten ambas para no depender del formato que sirva la API.
+        $first = ( isset( $res[0] ) && is_array( $res[0] ) ) ? $res[0] : $res;
+
+        if ( ! is_array( $first ) || empty( $first['familia'] ) ) {
+            return new WP_Error(
+                'unexpected_shape',
+                'Respuesta inesperada de la API para la familia ' . $family_code
+            );
+        }
 
         $family   = $first['familia'] ?? $family_code;
-        $title    = $first['descripcion_comercial'] ?? 'Producto ' . $family;
+        // Si la API no trae nombre NO se inventa uno: más abajo se conserva el
+        // título que ya tenga el producto.
+        $title    = trim( (string) ( $first['descripcion_comercial'] ?? '' ) );
         $content  = $first['descripcion_larga'] ?? '';
         $category = $first['subcategoria_1']['nombre_categoria'] ?? '';
         $gallery_urls = $first['imagenes'] ?? [];
@@ -53,13 +64,26 @@ class Marpico_Sync {
         $product_id = $this->find_product_by_family( $family );
 
         if ( $product_id ) {
-            wp_update_post( [
+            $post_data = [
                 'ID'           => $product_id,
-                'post_title'   => wp_strip_all_tags( $title ),
                 'post_content' => wp_kses_post( $content ),
-            ] );
+            ];
+            // El título sólo se reescribe si la API trae nombre; así un cambio de
+            // formato o una respuesta incompleta no deja el producto renombrado.
+            if ( '' !== $title ) {
+                $post_data['post_title'] = wp_strip_all_tags( $title );
+            }
+            wp_update_post( $post_data );
             $product = wc_get_product( $product_id );
+
+            if ( '' === $title ) {
+                $title = get_the_title( $product_id );
+            }
         } else {
+            // Producto nuevo: aquí sí hace falta un título, aunque la API no lo traiga.
+            if ( '' === $title ) {
+                $title = 'Producto ' . $family;
+            }
             $post_id = wp_insert_post( [
                 'post_title'   => wp_strip_all_tags( $title ),
                 'post_content' => wp_kses_post( $content ),
