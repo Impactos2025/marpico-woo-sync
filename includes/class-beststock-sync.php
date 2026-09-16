@@ -170,7 +170,11 @@ class BestStock_Sync {
         }
 
         // --- Datos básicos ---
-        $product->set_name($prod['name']);
+        // El título sólo lo escribe el sync si no lo ha editado una persona.
+        $aplicar_titulo = Manual_Edits::can_update_title( $existing ? $existing[0]->ID : 0 );
+        if ($aplicar_titulo) {
+            $product->set_name($prod['name']);
+        }
         $product->set_description($prod['description'] ?? '');
         if ( empty($prod['colors']) ) {
             if ( !empty($prod['price_scale'][0]['price']) ) {
@@ -178,6 +182,10 @@ class BestStock_Sync {
             }
         }
         $product_id = $product->save();
+
+        if ($aplicar_titulo) {
+            Manual_Edits::record_title($product_id, $prod['name']);
+        }
 
         // Guardar ID externo
         update_post_meta($product_id, '_beststock_id', $prod['id']);

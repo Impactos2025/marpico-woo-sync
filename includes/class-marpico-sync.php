@@ -68,15 +68,22 @@ class Marpico_Sync {
                 'ID'           => $product_id,
                 'post_content' => wp_kses_post( $content ),
             ];
-            // El título sólo se reescribe si la API trae nombre; así un cambio de
-            // formato o una respuesta incompleta no deja el producto renombrado.
-            if ( '' !== $title ) {
+            // El título sólo se reescribe si la API trae nombre y si no lo ha
+            // editado una persona desde WordPress; así ni un cambio de formato ni
+            // el proveedor pisan el trabajo del equipo.
+            $aplicar_titulo = ( '' !== $title ) && Manual_Edits::can_update_title( $product_id );
+
+            if ( $aplicar_titulo ) {
                 $post_data['post_title'] = wp_strip_all_tags( $title );
             }
             wp_update_post( $post_data );
             $product = wc_get_product( $product_id );
 
-            if ( '' === $title ) {
+            if ( $aplicar_titulo ) {
+                Manual_Edits::record_title( $product_id, wp_strip_all_tags( $title ) );
+            } else {
+                // Se conserva el título existente: el resto de la sincronización
+                // (nombres de variaciones) debe usar ese, no el de la API.
                 $title = get_the_title( $product_id );
             }
         } else {
@@ -96,6 +103,7 @@ class Marpico_Sync {
             $product = wc_get_product( $post_id );
             update_post_meta( $post_id, '_external_family', $family );
             update_post_meta( $post_id, '_sku', $family );
+            Manual_Edits::record_title( $post_id, wp_strip_all_tags( $title ) );
             $product_id = $post_id;
         }
 
