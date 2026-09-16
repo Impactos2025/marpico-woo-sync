@@ -24,6 +24,10 @@ class Category_Mapper {
 
     const OPTION = 'marpico_category_map';
 
+    /** Meta donde se registran los términos que asignó el sincronizador. */
+    const META_SYNCED_CATS  = '_mws_synced_cat_ids';
+    const META_SYNCED_BRAND = '_mws_synced_brand_ids';
+
     /** Cache de term_id por "slug" canónico dentro de una misma petición. */
     private static $term_cache = array();
 
@@ -341,6 +345,45 @@ class Category_Mapper {
     }
 
     /**
+     * Asigna términos SIN pisar los que haya puesto un humano desde WordPress.
+     *
+     * El sincronizador registra en un meta los términos que él mismo asignó. En la
+     * siguiente pasada sólo retira esos; todo lo demás (categorías creadas o
+     * añadidas a mano en el panel) se conserva.
+     *
+     * En la PRIMERA sincronización de un producto todavía no hay registro previo,
+     * así que no se puede distinguir lo manual de lo que puso el proveedor: en ese
+     * caso se conserva todo lo existente y se añade lo que llega de la API.
+     *
+     * @param int    $product_id ID del producto.
+     * @param array  $term_ids   Términos que asigna el proveedor en esta pasada.
+     * @param string $taxonomy   Taxonomía destino.
+     * @param string $meta_key   Meta donde se registran los términos del sync.
+     */
+    public static function assign_terms_preserving_manual( $product_id, $term_ids, $taxonomy = 'product_cat', $meta_key = self::META_SYNCED_CATS ) {
+        $product_id = intval( $product_id );
+        if ( ! $product_id ) return;
+
+        $term_ids = array_values( array_unique( array_filter( array_map( 'intval', (array) $term_ids ) ) ) );
+
+        $current = wp_get_object_terms( $product_id, $taxonomy, array( 'fields' => 'ids' ) );
+        if ( is_wp_error( $current ) ) $current = array();
+        $current = array_map( 'intval', $current );
+
+        $previous     = get_post_meta( $product_id, $meta_key, true );
+        $has_previous = is_array( $previous );
+        $previous     = $has_previous ? array_map( 'intval', $previous ) : array();
+
+        // Términos que NO puso el sincronizador -> son manuales, se respetan.
+        $manual = $has_previous ? array_diff( $current, $previous ) : $current;
+
+        $final = array_values( array_unique( array_merge( $manual, $term_ids ) ) );
+
+        wp_set_object_terms( $product_id, $final, $taxonomy );
+        update_post_meta( $product_id, $meta_key, $term_ids );
+    }
+
+    /**
      * Resuelve y ASIGNA las categorías de un producto Marpico.
      * Espera el primer material (array) con la clave 'subcategoria_1'.
      */
@@ -360,7 +403,7 @@ class Category_Mapper {
             if ( $child_id ) $assign[] = $child_id;
         }
 
-        wp_set_object_terms( $product_id, $assign, 'product_cat' );
+        self::assign_terms_preserving_manual( $product_id, $assign, 'product_cat' );
     }
 
     /**
@@ -397,7 +440,7 @@ class Category_Mapper {
         }
 
         if ( ! empty( $cat_ids ) ) {
-            wp_set_object_terms( $product_id, array_values( array_unique( $cat_ids ) ), 'product_cat' );
+            self::assign_terms_preserving_manual( $product_id, $cat_ids, 'product_cat' );
         }
 
         if ( ! empty( $tag_names ) ) {

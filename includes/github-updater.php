@@ -13,7 +13,9 @@ class GitHub_Updater {
 
     public function __construct($file, $github_url) {
         $this->file       = $file;
-        $this->plugin     = get_plugin_data($file);
+        // $markup=false, $translate=false: no traducir el header evita cargar el
+        // text domain antes de 'init' (Notice _load_textdomain_just_in_time en WP 6.7+).
+        $this->plugin     = get_plugin_data($file, false, false);
         $this->basename   = plugin_basename($file);
         $this->active     = is_plugin_active($this->basename);
         $this->github_url = $github_url;
@@ -40,6 +42,25 @@ class GitHub_Updater {
         return $this->github_api_result;
     }
 
+    /**
+     * URL del paquete a instalar.
+     *
+     * Se prefiere el primer adjunto .zip de la release (paquete limpio, con la
+     * carpeta del plugin en la raíz). Si la release no trae adjuntos se recurre al
+     * zipball que genera GitHub con el código fuente del repositorio.
+     */
+    private function get_package_url($release_info) {
+        if (!empty($release_info->assets) && is_array($release_info->assets)) {
+            foreach ($release_info->assets as $asset) {
+                $url = isset($asset->browser_download_url) ? $asset->browser_download_url : '';
+                if ($url && strtolower(substr($url, -4)) === '.zip') {
+                    return $url;
+                }
+            }
+        }
+        return isset($release_info->zipball_url) ? $release_info->zipball_url : '';
+    }
+
     public function check_update($transient) {
         if (empty($transient->checked)) return $transient;
 
@@ -51,7 +72,7 @@ class GitHub_Updater {
                     "slug"        => $this->basename,
                     "new_version" => $new_version,
                     "url"         => $this->plugin["PluginURI"],
-                    "package"     => $release_info->zipball_url
+                    "package"     => $this->get_package_url($release_info)
                 );
                 $transient->response[$this->basename] = (object)$plugin_info;
             }
@@ -71,7 +92,7 @@ class GitHub_Updater {
             "version"       => $release_info->tag_name,
             "author"        => $this->plugin["AuthorName"],
             "homepage"      => $this->plugin["PluginURI"],
-            "download_link" => $release_info->zipball_url,
+            "download_link" => $this->get_package_url($release_info),
             "sections"      => array(
                 "description" => $this->plugin["Description"],
             )
