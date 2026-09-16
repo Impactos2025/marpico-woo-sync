@@ -170,7 +170,11 @@ class BestStock_Sync {
         }
 
         // --- Datos básicos ---
-        $product->set_name($prod['name']);
+        // El título sólo lo escribe el sync si no lo ha editado una persona.
+        $aplicar_titulo = Manual_Edits::can_update_title( $existing ? $existing[0]->ID : 0 );
+        if ($aplicar_titulo) {
+            $product->set_name($prod['name']);
+        }
         $product->set_description($prod['description'] ?? '');
         if ( empty($prod['colors']) ) {
             if ( !empty($prod['price_scale'][0]['price']) ) {
@@ -178,6 +182,10 @@ class BestStock_Sync {
             }
         }
         $product_id = $product->save();
+
+        if ($aplicar_titulo) {
+            Manual_Edits::record_title($product_id, $prod['name']);
+        }
 
         // Guardar ID externo
         update_post_meta($product_id, '_beststock_id', $prod['id']);
@@ -210,14 +218,14 @@ class BestStock_Sync {
         error_log('Default category ID => ' . $default_cat);
         error_log('Terms después de limpiar => ' . print_r($terms, true));
 
+        // Asignar sin pisar las categorías puestas a mano en WordPress: sólo se
+        // retiran las que el propio sincronizador asignó en pasadas anteriores.
+        Category_Mapper::assign_terms_preserving_manual($product_id, $terms, 'product_cat');
+
         if (!empty($terms)) {
-            // Reemplazar todas las categorías
-            wp_set_object_terms($product_id, $terms, 'product_cat', false);
             error_log('Asignadas categorías al producto ' . $product_id . ' => ' . implode(',', $terms));
         } else {
-            // Eliminar todas las categorías sin meter Uncategorized
-            wp_set_object_terms($product_id, [], 'product_cat', false);
-            error_log('Sin categorías válidas, se eliminaron categorías en producto ' . $product_id);
+            error_log('Sin categorías válidas; se retiraron las del sync en producto ' . $product_id);
         }
 
         // --- Imagen destacada (ONLY basic_picture, NO agregarla a la galería) ---

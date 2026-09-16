@@ -118,10 +118,18 @@ class CDO_Sync {
             
         }
 
-        $wc_product->set_name($name);
+        // El título sólo lo escribe el sync si no lo ha editado una persona.
+        $aplicar_titulo = Manual_Edits::can_update_title($product_id);
+        if ($aplicar_titulo) {
+            $wc_product->set_name($name);
+        }
         $wc_product->set_description($description);
 
         $product_id = $wc_product->save();
+
+        if ($aplicar_titulo) {
+            Manual_Edits::record_title($product_id, $name);
+        }
 
         // ASIGNAR MARCA
         $this->assign_fixed_brand_to_product($product_id);
